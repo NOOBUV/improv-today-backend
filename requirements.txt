@@ -1,21 +1,27 @@
-# Core FastAPI
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+# Core FastAPI - Latest 2025 versions
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
 
-# AI/NLP - only what you need  
-openai==1.3.7
-spacy==3.7.2
-textstat==0.7.3
+# AI/NLP - Latest versions
+openai==1.58.1
+# spacy==3.4.4  # Commented out - causing build issues, not currently used
+textstat==0.7.4
 
-# Database - SQLite (file-based, no server needed)
-sqlalchemy==2.0.23
+# Database - PostgreSQL with SQLAlchemy 2.0
+sqlalchemy[asyncio,mypy]==2.0.36
+psycopg[binary]==3.2.3
+alembic==1.14.0
 
-# Minimal utilities
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
+# Pydantic v2 and settings
+pydantic==2.10.5
+pydantic-settings==2.8.0
+python-dotenv==1.0.1
 
-# Authentication & Security
+# Authentication & Security - Updated versions
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+
+# Additional modern dependencies
+httpx==0.28.1
+typing-extensions==4.12.2

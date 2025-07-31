@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, conversation, vocabulary, feedback
+from app.api import auth, conversation, vocabulary, feedback, sessions
 from app.core.config import settings
 
 app = FastAPI(title="Improv Today API", version="1.0.0")
@@ -16,6 +16,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(conversation.router, prefix="/api/conversation", tags=["conversation"])
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])

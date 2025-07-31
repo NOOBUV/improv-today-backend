@@ -1,0 +1,84 @@
+# Improv Today Database Migrations
+
+This directory contains Alembic database migrations for the Improv Today backend.
+
+## Prerequisites
+
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Configure Supabase**: Ensure your `.env` file has proper Supabase credentials
+3. **Test connection**: Run `make db-check` to verify database connectivity
+
+## Migration Workflow
+
+### Creating Migrations (Autogeneration)
+```bash
+# Generate migration from model changes
+cd improv-today-backend
+alembic revision --autogenerate -m "Description of changes"
+
+# Or use the Makefile shortcut
+make migrate message="Description of changes"
+```
+
+### Applying Migrations
+```bash
+# Apply all pending migrations
+cd improv-today-backend
+alembic upgrade head
+
+# Or use Makefile
+make migrate-upgrade
+```
+
+### Rolling Back Migrations
+```bash
+# Rollback one migration
+cd improv-today-backend
+alembic downgrade -1
+
+# Or use Makefile
+make migrate-downgrade
+```
+
+### Migration History
+```bash
+# View migration history
+alembic history
+
+# View current migration
+alembic current
+```
+
+## Important Notes
+
+- **Always review generated migrations** before applying them
+- **Test migrations** on development database first
+- **Model changes**: Any changes to models in `app/models/` will be detected
+- **Manual migration editing**: You can edit generated migrations before applying
+- **Backup**: Always backup production data before running migrations
+
+## Troubleshooting
+
+### Import Errors
+If you get import errors when generating migrations:
+```bash
+# Ensure you're in the backend directory
+cd improv-today-backend
+
+# Check Python path includes the app
+export PYTHONPATH=$PWD:$PYTHONPATH
+```
+
+### Database Connection Issues
+```bash
+# Test database connection
+make db-check
+
+# Check environment variables
+echo $DATABASE_URL
+```
+
+### Model Detection Issues
+- Ensure all models are imported in `app/models/__init__.py`
+- Check that `alembic/env.py` imports `app.models`
+- Verify models inherit from `Base` from `app.core.database`
