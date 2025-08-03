@@ -103,8 +103,8 @@ class SimpleOpenAIService:
                 analysis_notes="Analysis failed, using original transcript"
             )
         
-    async def generate_vocabulary_focused_response(self, message: str, target_vocabulary: list = None, topic: str = "") -> str:
-        """Generate response using modern OpenAI client - backwards compatible"""
+    async def generate_personality_response(self, message: str, personality: str = "friendly_neutral", target_vocabulary: list = None, topic: str = "") -> str:
+        """Generate response with specific personality - AI-driven conversation without topic selection"""
         
         if not settings.openai_api_key:
             return self._get_smart_fallback_response(message)
@@ -112,18 +112,30 @@ class SimpleOpenAIService:
         try:
             vocab_words = [v.get("word", "") for v in target_vocabulary] if target_vocabulary else []
             
-            system_prompt = f"""You are a supportive English conversation partner helping someone practice. 
+            # Define personality-based system prompts
+            personality_prompts = {
+                "sassy_english": """You are a witty, sassy English conversation partner with a charming British accent in your responses. Be playful, slightly cheeky, but encouraging. Ask engaging questions naturally and let the conversation flow organically. Don't ask them to choose topics - instead, be curious about what they want to talk about today.""",
+                
+                "blunt_american": """You are a direct, no-nonsense American conversation partner. Be straightforward, honest, and practical in your responses while remaining supportive. Ask direct questions and get to the point. Don't ask them to choose topics - just ask what's on their mind or what they want to discuss.""",
+                
+                "friendly_neutral": """You are a warm, encouraging conversation partner. Be supportive, patient, and genuinely interested in the conversation. Ask thoughtful questions and show curiosity about their thoughts and experiences. Let the conversation develop naturally without forcing topic selection."""
+            }
+            
+            base_prompt = personality_prompts.get(personality, personality_prompts["friendly_neutral"])
+            
+            vocab_context = f"If appropriate, subtly encourage the use of these vocabulary words: {', '.join(vocab_words)}" if vocab_words else ""
+            
+            system_prompt = f"""{base_prompt}
 
 Your goals:
-1. Have natural, engaging conversations
+1. Have natural, engaging conversations that flow organically
 2. Ask follow-up questions to keep the conversation going
-3. If vocabulary words are provided, subtly encourage their use: {', '.join(vocab_words)}
-4. Keep responses friendly and conversational (1-2 sentences)
-5. Show genuine interest in what they're saying
+3. Show genuine interest in what they're saying
+4. {vocab_context}
+5. Keep responses conversational (1-2 sentences)
+6. Let the AI naturally ask what to talk about instead of topic selection
 
-Topic focus: {topic or 'general conversation'}
-
-Be encouraging and respond naturally to what they say."""
+Be encouraging and respond authentically to what they say."""
             
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -140,6 +152,67 @@ Be encouraging and respond naturally to what they say."""
         except Exception as e:
             print(f"OpenAI Request Error: {str(e)}")
             return self._get_smart_fallback_response(message)
+    
+    async def generate_vocabulary_focused_response(self, message: str, target_vocabulary: list = None, topic: str = "") -> str:
+        """Legacy method - calls new personality method with default personality"""
+        return await self.generate_personality_response(message, "friendly_neutral", target_vocabulary, topic)
+    
+    async def generate_welcome_message(self, personality: str = "friendly_neutral") -> str:
+        """Generate personalized welcome message for first-time users"""
+        
+        if not settings.openai_api_key:
+            return self._get_fallback_welcome_message(personality)
+            
+        try:
+            personality_prompts = {
+                "sassy_english": """You are a witty, sassy English conversation partner with a charming British accent. Generate a warm welcome message that immediately starts conversation without any buttons or topic selection. Be playful and cheeky but welcoming.""",
+                
+                "blunt_american": """You are a direct, no-nonsense American conversation partner. Generate a straightforward welcome message that gets right to conversation without any topic selection. Be direct but friendly.""",
+                
+                "friendly_neutral": """You are a warm, encouraging conversation partner. Generate a welcoming message that immediately starts natural conversation without any topic selection. Be genuinely interested and supportive."""
+            }
+            
+            base_prompt = personality_prompts.get(personality, personality_prompts["friendly_neutral"])
+            
+            system_prompt = f"""{base_prompt}
+
+Generate a welcome message that:
+1. Welcomes them to ImprovToday
+2. Asks for their name to address them personally
+3. Asks about their day or something they did today
+4. Starts conversation naturally without topic selection
+5. Keep it conversational and under 3 sentences
+6. Make it feel like talking to a friend
+
+Example structure: Welcome message + name question + day/activity question"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Create a welcoming first-time user message"}
+                ],
+                max_tokens=100,
+                temperature=0.8
+            )
+            
+            return response.choices[0].message.content.strip()
+                
+        except Exception as e:
+            print(f"OpenAI Welcome Message Error: {str(e)}")
+            return self._get_fallback_welcome_message(personality)
+    
+    def _get_fallback_welcome_message(self, personality: str) -> str:
+        """Fallback welcome messages when OpenAI is unavailable"""
+        messages = {
+            "sassy_english": "Well hello there! Welcome to ImprovToday, darling! What name shall I call you, and do tell me - how's your day been? Anything exciting happen that you'd fancy chatting about?",
+            
+            "blunt_american": "Hey there, welcome to ImprovToday! Let's cut to the chase - what should I call you, and how was your day? What's been going on?",
+            
+            "friendly_neutral": "Welcome to ImprovToday! I'm so glad you're here. What name should I address you with? And how has your day been - did you do anything interesting today that you'd like to share?"
+        }
+        
+        return messages.get(personality, messages["friendly_neutral"])
 
     async def generate_structured_conversation_response(self, 
                                                        user_message: str, 
