@@ -2,6 +2,7 @@
 from .user import User
 from .session import Session, SessionTranscript
 from .vocabulary import VocabularyAssessment, VocabularyRecommendation, VocabularyUsage
+from .conversation_v2 import Conversation, ConversationMessage, SessionState, UserPreferences
 
 __all__ = [
     "User",
@@ -9,5 +10,9 @@ __all__ = [
     "SessionTranscript",
     "VocabularyAssessment",
     "VocabularyRecommendation", 
-    "VocabularyUsage"
+    "VocabularyUsage",
+    "Conversation",
+    "ConversationMessage", 
+    "SessionState",
+    "UserPreferences"
 ]
