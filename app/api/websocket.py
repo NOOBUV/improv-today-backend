@@ -369,6 +369,178 @@ async def send_ai_response(
     }
 
 
+@router.websocket("/ws")
+async def simple_websocket_endpoint(websocket: WebSocket):
+    """
+    Simple WebSocket endpoint for frontend integration.
+    
+    This endpoint handles the frontend's expected `/ws` connection
+    and manages conversation sessions dynamically through messages.
+    """
+    try:
+        await websocket.accept()
+        logger.info("Simple WebSocket connected from frontend")
+        
+        # Get database session manually
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        
+        # Initialize session state
+        current_conversation_id = None
+        
+        while True:
+            message = await websocket.receive_text()
+            
+            try:
+                data = json.loads(message)
+                message_type = data.get("type")
+                message_data = data.get("data", {})
+                
+                logger.info(f"Received message type: {message_type}")
+                
+                if message_type == "ping":
+                    # Handle heartbeat
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                
+                elif message_type == "start_conversation":
+                    # Create a new conversation and start session
+                    personality = message_data.get("personality", "friendly")
+                    skip_welcome = message_data.get("skipWelcome", False)
+                    user_name = message_data.get("userName", "User")
+                    
+                    # Create new conversation in database
+                    conversation_metadata = {
+                        "user_name": user_name,
+                        "start_time": datetime.now().isoformat(),
+                        "skip_welcome": skip_welcome
+                    }
+                    
+                    conversation = Conversation(
+                        user_id=f"anonymous_{datetime.now().timestamp()}",  # Anonymous user
+                        personality=personality,
+                        conversation_metadata=conversation_metadata,
+                        status="active"
+                    )
+                    db.add(conversation)
+                    db.commit()
+                    db.refresh(conversation)
+                    
+                    current_conversation_id = str(conversation.id)  # Convert UUID to string
+                    logger.info(f"Created new conversation: {current_conversation_id}")
+                    
+                    # Send conversation started message
+                    welcome_message = None if skip_welcome else f"Hello {user_name}! I'm ready to help you practice English. What would you like to talk about?"
+                    
+                    await websocket.send_text(json.dumps({
+                        "type": "conversation_started",
+                        "data": {
+                            "conversationId": current_conversation_id,
+                            "welcomeMessage": welcome_message
+                        },
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                
+                elif message_type == "conversation_message":
+                    # Handle conversation message
+                    if not current_conversation_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "data": {
+                                "message": "No active conversation. Please start a conversation first.",
+                                "code": "no_active_conversation"
+                            },
+                            "timestamp": datetime.now().isoformat()
+                        }))
+                        continue
+                    
+                    # Extract message details
+                    user_message = message_data.get("message", "")
+                    personality = message_data.get("personality", "friendly")
+                    
+                    if not user_message:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "data": {
+                                "message": "Message content is required",
+                                "code": "missing_message"
+                            },
+                            "timestamp": datetime.now().isoformat()
+                        }))
+                        continue
+                    
+                    # For now, send a simple response based on personality
+                    # In a full implementation, this would call the AI service
+                    responses = {
+                        "friendly": f"That's really interesting about '{user_message}'! I'd love to hear more about your experience with that.",
+                        "sassy": f"Oh, '{user_message}'? How utterly fascinating, darling! Do tell me more - I'm positively riveted!",
+                        "blunt": f"'{user_message}' - okay, got it. What's your point exactly?"
+                    }
+                    
+                    ai_response = responses.get(personality, responses["friendly"])
+                    
+                    # Send AI response
+                    await websocket.send_text(json.dumps({
+                        "type": "conversation_response",
+                        "data": {
+                            "response": ai_response,
+                            "conversationId": current_conversation_id,
+                            "feedback": {
+                                "clarity": 85,
+                                "fluency": 80,
+                                "vocabularyUsage": [],
+                                "suggestions": ["Great conversation!"],
+                                "overallRating": 4
+                            }
+                        },
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                
+                else:
+                    logger.warning(f"Unknown message type: {message_type}")
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "data": {
+                            "message": f"Unknown message type: {message_type}",
+                            "code": "unknown_message_type"
+                        },
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                    
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "data": {
+                        "message": "Invalid JSON format",
+                        "code": "invalid_json"
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }))
+            except Exception as e:
+                logger.error(f"Error handling WebSocket message: {e}")
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "data": {
+                        "message": "Internal server error",
+                        "code": "internal_error"
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }))
+                
+    except WebSocketDisconnect as e:
+        logger.info(f"Simple WebSocket disconnected: code={e.code}, reason={getattr(e, 'reason', 'No reason')}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+    finally:
+        try:
+            db.close()
+        except:
+            pass
+        logger.info("Simple WebSocket connection closed")
+
+
 @router.get("/conversations/{conversation_id}/connections")
 async def get_active_connections(
     conversation_id: str,

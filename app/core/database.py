@@ -6,15 +6,33 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Create engine with connection pooling for PostgreSQL
-engine = create_engine(
-    settings.database_url,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-    pool_timeout=settings.db_pool_timeout,
-    pool_pre_ping=True,  # Verify connections before use
-    echo=settings.debug,  # Log SQL queries in debug mode
-)
+# Determine database type and configure engine accordingly
+def create_database_engine():
+    """Create database engine with appropriate configuration based on database type"""
+    database_url = settings.database_url
+    
+    if database_url.startswith('sqlite'):
+        # SQLite configuration
+        engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},  # Required for SQLite
+            echo=settings.debug,
+        )
+    else:
+        # PostgreSQL configuration
+        engine = create_engine(
+            database_url,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_pre_ping=True,  # Verify connections before use
+            echo=settings.debug,  # Log SQL queries in debug mode
+        )
+    
+    return engine
+
+# Create engine
+engine = create_database_engine()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

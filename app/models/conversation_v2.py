@@ -4,7 +4,8 @@ These models follow the system redesign plan with UUID primary keys,
 proper message tracking, and real-time state management.
 """
 from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -25,7 +26,7 @@ class Conversation(Base):
     personality = Column(String(50), default='friendly_neutral')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    conversation_metadata = Column(JSONB, nullable=True)  # Store conversation metadata
+    conversation_metadata = Column(JSON, nullable=True)  # Store conversation metadata
     
     # Relationships
     messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan")
@@ -46,7 +47,7 @@ class ConversationMessage(Base):
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     audio_url = Column(String(500), nullable=True)  # For TTS audio storage
-    feedback = Column(JSONB, nullable=True)  # Feedback data for the message
+    feedback = Column(JSON, nullable=True)  # Feedback data for the message
     processing_time = Column(Integer, nullable=True)  # AI response time in milliseconds
     
     # Relationships
@@ -82,6 +83,6 @@ class UserPreferences(Base):
     user_id = Column(String(255), nullable=False, unique=True, index=True)
     preferred_voice = Column(String(100), nullable=True)
     preferred_personality = Column(String(50), default='friendly_neutral')
-    settings = Column(JSONB, nullable=True)  # Additional user settings
+    settings = Column(JSON, nullable=True)  # Additional user settings
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

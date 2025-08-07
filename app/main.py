@@ -10,7 +10,13 @@ app = FastAPI(title="Improv Today API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:3000",  # Frontend URL for local development
+        "http://127.0.0.1:3000",  # Alternative localhost
+        "http://frontend:3000",   # Docker container name
+        "ws://localhost:8000",    # WebSocket origin
+        "ws://127.0.0.1:8000",    # Alternative WebSocket origin
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,12 +54,24 @@ async def startup_event():
     logger = logging.getLogger("app.startup")
     logger.info("Initializing ImprovToday backend services...")
     
+    # Import models to ensure they're registered with Base
+    from app.models import conversation_v2, user, session, vocabulary
+    
+    # Initialize database tables
+    from app.core.database import create_tables, check_connection
+    if check_connection():
+        create_tables()
+        logger.info("Database tables initialized")
+    else:
+        logger.error("Database connection failed")
+    
     # Initialize conversation state manager
     logger.info("Conversation state manager initialized")
     
     # Log available endpoints
     logger.info("WebSocket endpoints available:")
-    logger.info("  - /api/ws/conversations/{conversation_id} - Main WebSocket endpoint")
+    logger.info("  - /api/ws - Simple WebSocket endpoint for frontend integration")
+    logger.info("  - /api/ws/conversations/{conversation_id} - Advanced WebSocket endpoint")
     logger.info("  - /api/v2/conversations - Enhanced conversation API")
     logger.info("  - /api/test/conversations - Test endpoints for validation")
     
