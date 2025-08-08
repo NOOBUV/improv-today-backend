@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   improv:
     driver: bridge
@@ -24,8 +22,9 @@ services:
         ENVIRONMENT: production
     depends_on:
       - redis
+    # Bind container to localhost only so Nginx on host can proxy, not exposed publicly
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - /opt/improv-today/improv-today-backend.env
     environment:
