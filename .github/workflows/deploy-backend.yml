@@ -1,0 +1,54 @@
+name: Deploy backend to EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure rsync is available
+        run: |
+          if ! command -v rsync >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y rsync
+          fi
+
+      - name: Write SSH key
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      - name: Add EC2 to known_hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rsync repository to EC2 (excludes .git)
+        run: |
+          rsync -az --delete -e "ssh -i key.pem" \
+            --exclude ".git" \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_DEPLOY_PATH }}/
+
+      - name: Deploy with docker-compose (production)
+        run: |
+          ssh -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+            cd ${{ secrets.EC2_DEPLOY_PATH }}
+
+            # Build and start using compose prod file
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            # Run DB migrations inside the backend service
+            docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head || true
+
+            # Health check
+            curl -sSf http://localhost:8000/health | cat
+          EOF
+
+
