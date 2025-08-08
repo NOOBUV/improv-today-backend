@@ -20,10 +20,10 @@ jobs:
             sudo apt-get install -y rsync
           fi
 
-      - name: Write SSH key
-        run: |
-          printf "%s" "${{ secrets.EC2_SSH_PRIVATE_KEY }}" | tr -d '\r' > key.pem
-          chmod 600 key.pem
+      - name: Start ssh-agent and add key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
 
       - name: Add EC2 to known_hosts
         run: |
@@ -34,19 +34,31 @@ jobs:
 
       - name: Test SSH connectivity and prepare deploy path
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes \
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "echo 'SSH OK'; sudo mkdir -p ${{ secrets.EC2_DEPLOY_PATH }} && sudo chown -R \$(whoami):\$(whoami) ${{ secrets.EC2_DEPLOY_PATH }}"
 
       - name: Rsync repository to EC2 (excludes .git)
         run: |
-          rsync -az --delete -e "ssh -i key.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes" \
+          rsync -az --delete -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
             --exclude ".git" \
             ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_DEPLOY_PATH }}/
 
+      - name: Upload backend env file to EC2
+        run: |
+          # BACKEND_ENV is a multiline secret containing the contents of improv-today-backend.env
+          printf "%s" "${{ secrets.BACKEND_ENV }}" > backend.env
+          chmod 600 backend.env
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null backend.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/improv-today-backend.env
+          rm -f backend.env
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo mkdir -p /opt/improv-today && sudo mv /tmp/improv-today-backend.env /opt/improv-today/improv-today-backend.env && sudo chown \$(whoami):\$(whoami) /opt/improv-today/improv-today-backend.env"
+
       - name: Deploy with docker-compose (production)
         run: |
-          ssh -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
             cd ${{ secrets.EC2_DEPLOY_PATH }}
 
