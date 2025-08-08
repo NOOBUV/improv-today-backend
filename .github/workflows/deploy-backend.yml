@@ -22,7 +22,7 @@ jobs:
 
       - name: Write SSH key
         run: |
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > key.pem
+          printf "%s" "${{ secrets.EC2_SSH_PRIVATE_KEY }}" | tr -d '\r' > key.pem
           chmod 600 key.pem
 
       - name: Add EC2 to known_hosts
@@ -32,9 +32,15 @@ jobs:
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Test SSH connectivity and prepare deploy path
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "echo 'SSH OK'; sudo mkdir -p ${{ secrets.EC2_DEPLOY_PATH }} && sudo chown -R \$(whoami):\$(whoami) ${{ secrets.EC2_DEPLOY_PATH }}"
+
       - name: Rsync repository to EC2 (excludes .git)
         run: |
-          rsync -az --delete -e "ssh -i key.pem" \
+          rsync -az --delete -e "ssh -i key.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes" \
             --exclude ".git" \
             ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.EC2_DEPLOY_PATH }}/
 
