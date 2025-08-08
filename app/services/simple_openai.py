@@ -103,7 +103,7 @@ class SimpleOpenAIService:
                 analysis_notes="Analysis failed, using original transcript"
             )
         
-    async def generate_personality_response(self, message: str, personality: str = "friendly_neutral", target_vocabulary: list = None, topic: str = "") -> str:
+    async def generate_personality_response(self, message: str, personality: str = "friendly_neutral", target_vocabulary: list = None, topic: str = "", previous_ai_reply: Optional[str] = None) -> str:
         """Generate response with specific personality - AI-driven conversation without topic selection"""
         
         if not settings.openai_api_key:
@@ -125,6 +125,14 @@ class SimpleOpenAIService:
             
             vocab_context = f"If appropriate, subtly encourage the use of these vocabulary words: {', '.join(vocab_words)}" if vocab_words else ""
             
+            # Light-weight transcription repair: consider previous AI reply and infer intended meaning
+            repair_context = ""
+            if previous_ai_reply:
+                repair_context = f"""
+You previously said: "{previous_ai_reply}"
+If the user's text appears to be a mis-transcription relative to the prior reply, infer the most likely intended sentence and respond to that intended meaning instead of the raw text. Keep changes minimal and only when the raw text is obviously wrong or incomplete.
+"""
+
             system_prompt = f"""{base_prompt}
 
 Your goals:
@@ -135,7 +143,9 @@ Your goals:
 5. Keep responses conversational (1-2 sentences)
 6. Let the AI naturally ask what to talk about instead of topic selection
 
-Be encouraging and respond authentically to what they say."""
+Be encouraging and respond authentically to what they say.
+{repair_context}
+"""
             
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",

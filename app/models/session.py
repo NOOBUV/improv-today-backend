@@ -13,11 +13,15 @@ class Session(Base):
     session_type = Column(String, default="practice")  # assessment, practice, daily
     topic = Column(String, nullable=True)
     status = Column(String, default="active")  # active, completed, failed, abandoned
+    # Personality selected for this session (e.g., friendly, sassy, blunt)
+    personality = Column(String, nullable=True)
     
     # Timing
     start_time = Column(DateTime(timezone=True), server_default=func.now())
     end_time = Column(DateTime(timezone=True), nullable=True)
     duration_seconds = Column(Integer, nullable=True)
+    # Timestamp of the last message exchange in this session
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
     
     # Metrics
     word_count = Column(Integer, default=0)

@@ -5,15 +5,18 @@ from app.services.simple_openai import SimpleOpenAIService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from pydantic import BaseModel
 from typing import List, Dict, Optional
+from datetime import datetime
 
 router = APIRouter()
 
 class ConversationRequest(BaseModel):
     message: str
-    personality: str = "friendly_neutral"  # sassy_english, blunt_american, friendly_neutral
+    session_id: Optional[int] = None
+    personality: Optional[str] = None  # will default from session if not provided
     target_vocabulary: Optional[List[Dict]] = []
     session_type: str = "daily"
     topic: Optional[str] = ""
+    last_ai_reply: Optional[str] = None
 
 class ConversationResponse(BaseModel):
     response: str
@@ -32,15 +35,36 @@ async def handle_conversation(request: ConversationRequest, db: Session = Depend
         openai_service = SimpleOpenAIService()
         vocabulary_service = VocabularyTierService()
         
+        # Load personality and topic from session if session_id provided
+        session_personality = request.personality
+        if request.session_id:
+            from app.models.session import Session as SessionModel
+            session_row = db.query(SessionModel).filter(SessionModel.id == request.session_id).first()
+            if not session_row:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session_personality = session_personality or (session_row.personality or "friendly_neutral")
+            # update last_message_at
+            session_row.last_message_at = datetime.utcnow()
+            db.commit()
+
         # Analyze vocabulary tier
         tier_analysis = vocabulary_service.analyze_vocabulary_tier(request.message)
         
         # Generate AI response with personality
+        # Map minimalist personalities to existing prompt keys
+        personality_map = {
+            "friendly": "friendly_neutral",
+            "sassy": "sassy_english",
+            "blunt": "blunt_american",
+        }
+        effective_personality = personality_map.get(session_personality or "friendly", session_personality or "friendly_neutral")
+
         ai_response = await openai_service.generate_personality_response(
-            request.message, 
-            request.personality,
+            request.message,
+            effective_personality,
             request.target_vocabulary,
-            request.topic
+            request.topic,
+            previous_ai_reply=request.last_ai_reply,
         )
         
         # Create enhanced feedback with vocabulary tier

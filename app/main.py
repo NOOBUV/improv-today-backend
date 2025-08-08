@@ -1,6 +1,7 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from app.api import auth, conversation, conversation_v2, conversation_test, vocabulary, feedback, sessions, websocket
 from app.core.config import settings
 from app.services.conversation_state_manager import conversation_state_manager
@@ -8,15 +9,13 @@ from app.services.conversation_state_manager import conversation_state_manager
 app = FastAPI(title="Improv Today API", version="1.0.0")
 
 # CORS middleware
+# CORS origins from env (comma-separated), fallback to common localhost dev origins
+cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://frontend:3000")
+allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Frontend URL for local development
-        "http://127.0.0.1:3000",  # Alternative localhost
-        "http://frontend:3000",   # Docker container name
-        "ws://localhost:8000",    # WebSocket origin
-        "ws://127.0.0.1:8000",    # Alternative WebSocket origin
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,9 +57,11 @@ async def startup_event():
     from app.models import conversation_v2, user, session, vocabulary
     
     # Initialize database tables
-    from app.core.database import create_tables, check_connection
+    from app.core.database import create_tables, check_connection, ensure_dev_sqlite_columns
     if check_connection():
         create_tables()
+        # Dev convenience: add columns for SQLite if missing
+        ensure_dev_sqlite_columns()
         logger.info("Database tables initialized")
     else:
         logger.error("Database connection failed")

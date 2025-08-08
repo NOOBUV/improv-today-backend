@@ -1,13 +1,15 @@
 from sqlalchemy import Integer, String, DateTime, Boolean, Text, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from app.core.database import Base
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Anonymous identity cookie UUID
+    anon_uuid: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     hashed_password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -26,3 +28,7 @@ class User(Base):
     sessions: Mapped[List["Session"]] = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     vocabulary_assessments: Mapped[List["VocabularyAssessment"]] = relationship("VocabularyAssessment", back_populates="user", cascade="all, delete-orphan")
     vocabulary_recommendations: Mapped[List["VocabularyRecommendation"]] = relationship("VocabularyRecommendation", back_populates="user", cascade="all, delete-orphan")
+
+if TYPE_CHECKING:
+    from app.models.session import Session  # noqa: F401
+    from app.models.vocabulary import VocabularyAssessment, VocabularyRecommendation  # noqa: F401

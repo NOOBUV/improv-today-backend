@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
 from typing import Optional, Dict, Any
+import uuid
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from sqlalchemy.exc import OperationalError
 from app.models.user import User
 from app.models.session import Session as SessionModel, SessionTranscript
 from app.models.vocabulary import VocabularyUsage
@@ -16,6 +18,7 @@ router = APIRouter()
 class SessionStartRequest(BaseModel):
     session_type: str = "practice"  # practice, assessment, daily
     topic: Optional[str] = None
+    personality: Optional[str] = "friendly"
     user_id: Optional[int] = None  # For anonymous users, we'll create one
 
 class SessionStartResponse(BaseModel):
@@ -23,6 +26,7 @@ class SessionStartResponse(BaseModel):
     user_id: int
     status: str
     start_time: datetime
+    personality: Optional[str]
     message: str
 
 class SessionEndRequest(BaseModel):
@@ -48,23 +52,62 @@ class TranscriptSaveRequest(BaseModel):
     detected_vocabulary_level: Optional[str] = None
 
 @router.post("/start", response_model=SessionStartResponse)
-async def start_session(request: SessionStartRequest, db: Session = Depends(get_db)):
+async def start_session(request: SessionStartRequest, response: Response, http_request: Request, db: Session = Depends(get_db)):
     """
     Start a new conversation session
     Creates user if needed (for first-time anonymous users)
     """
     try:
         user_id = request.user_id
+        # Issue or reuse anonymous identity cookie
+        anon_cookie_name = "it_user"
+        anon_uuid_value = http_request.cookies.get(anon_cookie_name)
+        if not anon_uuid_value:
+            anon_uuid_value = str(uuid.uuid4())
+            # In production, set Secure and SameSite=None; in dev, allow over http
+            secure_flag = http_request.url.scheme == "https"
+            response.set_cookie(
+                key=anon_cookie_name,
+                value=anon_uuid_value,
+                httponly=True,
+                samesite="none" if secure_flag else "lax",
+                secure=secure_flag,
+                max_age=60 * 60 * 24 * 365,  # 1 year
+                path="/",
+            )
         
         # Create anonymous user if none provided
         if not user_id:
-            new_user = User(
-                is_anonymous=True,
-                assessment_completed=False
-            )
-            db.add(new_user)
-            db.commit()
-            db.refresh(new_user)
+            # Reuse existing anonymous user if cookie present
+            existing_user = None
+            if anon_uuid_value:
+                existing_user = db.query(User).filter(User.anon_uuid == anon_uuid_value).first()
+            if existing_user:
+                new_user = existing_user
+            else:
+                new_user = User(
+                    is_anonymous=True,
+                    assessment_completed=False,
+                    anon_uuid=anon_uuid_value
+                )
+            try:
+                db.add(new_user)
+                db.commit()
+                db.refresh(new_user)
+            except OperationalError as oe:
+                # Likely schema mismatch (e.g., anon_uuid column missing). Fallback: create user without anon_uuid
+                db.rollback()
+                try:
+                    new_user = User(
+                        is_anonymous=True,
+                        assessment_completed=False,
+                    )
+                    db.add(new_user)
+                    db.commit()
+                    db.refresh(new_user)
+                except Exception:
+                    db.rollback()
+                    raise
             user_id = new_user.id
         
         # Create new session
@@ -73,6 +116,7 @@ async def start_session(request: SessionStartRequest, db: Session = Depends(get_
             session_type=request.session_type,
             topic=request.topic,
             status="active",
+            personality=request.personality,
             start_time=datetime.utcnow(),
             word_count=0,
             vocabulary_used_count=0
@@ -87,6 +131,7 @@ async def start_session(request: SessionStartRequest, db: Session = Depends(get_
             user_id=user_id,
             status=session.status,
             start_time=session.start_time,
+            personality=session.personality,
             message=f"Session started successfully. Session ID: {session.id}"
         )
         
