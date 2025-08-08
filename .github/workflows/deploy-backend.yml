@@ -27,7 +27,10 @@ jobs:
 
       - name: Add EC2 to known_hosts
         run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
       - name: Rsync repository to EC2 (excludes .git)
         run: |
