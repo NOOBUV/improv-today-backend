@@ -1,0 +1,40 @@
+version: '3.8'
+
+networks:
+  improv:
+    driver: bridge
+
+volumes:
+  redis_data:
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379" # local dev visibility
+    volumes:
+      - redis_data:/data
+    networks:
+      - improv
+
+  backend:
+    build: .
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app  # Live code reload for local dev
+    env_file:
+      - ./.env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=development
+      # Example Redis URL for future use in code: redis://redis:6379/0
+      # REDIS_URL=redis://redis:6379/0
+    restart: unless-stopped
+    networks:
+      - improv
+
+

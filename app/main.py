@@ -6,7 +6,15 @@ from app.api import auth, conversation, conversation_v2, conversation_test, voca
 from app.core.config import settings
 from app.services.conversation_state_manager import conversation_state_manager
 
-app = FastAPI(title="Improv Today API", version="1.0.0")
+from app.core.config import settings
+
+app = FastAPI(
+    title="Improv Today API",
+    version="1.0.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
+)
 
 # CORS middleware
 # CORS origins from env (comma-separated), fallback to common localhost dev origins
@@ -59,9 +67,11 @@ async def startup_event():
     # Initialize database tables
     from app.core.database import create_tables, check_connection, ensure_dev_sqlite_columns
     if check_connection():
-        create_tables()
-        # Dev convenience: add columns for SQLite if missing
-        ensure_dev_sqlite_columns()
+        # In production, rely on Alembic migrations
+        if settings.is_development:
+            create_tables()
+            # Dev convenience: add columns for SQLite if missing
+            ensure_dev_sqlite_columns()
         logger.info("Database tables initialized")
     else:
         logger.error("Database connection failed")

@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 def create_database_engine():
     """Create database engine with appropriate configuration based on database type"""
     database_url = settings.database_url
+    # Normalize to psycopg3 driver if using Postgres without explicit driver
+    if database_url.startswith('postgresql://') and '+psycopg' not in database_url:
+        database_url = database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
     
     if database_url.startswith('sqlite'):
         # SQLite configuration

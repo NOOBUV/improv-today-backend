@@ -1,4 +1,3 @@
-# Simple Dockerfile for solo MVP development
 FROM python:3.11-slim
 
 # Set working directory
@@ -19,5 +18,21 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
-# Simple startup - no complexity
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default to production command; override with --build-arg ENVIRONMENT=development for dev
+ARG ENVIRONMENT=production
+ENV ENVIRONMENT=$ENVIRONMENT
+
+# Gunicorn config: 2-4 workers typical for small instances; adjust via env
+ENV WEB_CONCURRENCY=2
+ENV WORKER_CLASS=uvicorn.workers.UvicornWorker
+
+# Start with Gunicorn in production; fall back to uvicorn with reload in development
+CMD bash -lc 'if [ "$ENVIRONMENT" = "development" ]; then \
+  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload; \
+else \
+  exec gunicorn app.main:app \
+    --bind 0.0.0.0:8000 \
+    --workers ${WEB_CONCURRENCY} \
+    --worker-class ${WORKER_CLASS} \
+    --timeout 60; \
+fi'
