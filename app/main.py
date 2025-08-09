@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, conversation_v2, conversation_test, vocabulary, feedback, sessions, websocket
+from app.api import auth, conversation, conversation_test, vocabulary, feedback, sessions, websocket
 from app.core.config import settings
 from app.services.conversation_state_manager import conversation_state_manager
 
@@ -33,9 +33,6 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(conversation.router, prefix="/api/conversation", tags=["conversation"])
-
-# Enhanced conversation API with WebSocket integration
-app.include_router(conversation_v2.router, prefix="/api/v2", tags=["conversation-v2", "realtime"])
 
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
@@ -83,7 +80,6 @@ async def startup_event():
     logger.info("WebSocket endpoints available:")
     logger.info("  - /api/ws - Simple WebSocket endpoint for frontend integration")
     logger.info("  - /api/ws/conversations/{conversation_id} - Advanced WebSocket endpoint")
-    logger.info("  - /api/v2/conversations - Enhanced conversation API")
     logger.info("  - /api/test/conversations - Test endpoints for validation")
     
     logger.info("ImprovToday backend startup complete")
