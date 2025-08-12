@@ -10,6 +10,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     # Anonymous identity cookie UUID
     anon_uuid: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
+    # Auth0 subject identifier for authenticated users
+    auth0_sub: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     hashed_password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

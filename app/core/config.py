@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # Security
     jwt_secret: str = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
     
+    # Auth0 Configuration
+    auth0_domain: str = os.getenv("AUTH0_DOMAIN", "")
+    auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "")
+    auth0_issuer: str = os.getenv("AUTH0_ISSUER", "")
+    jwt_algorithms: str = os.getenv("JWT_ALGORITHMS", "RS256")
+    
     # Application Settings
     environment: str = os.getenv("ENVIRONMENT", "development")
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
