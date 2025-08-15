@@ -2,10 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, conversation_test, vocabulary, feedback, sessions, websocket
-from app.core.config import settings
-from app.services.conversation_state_manager import conversation_state_manager
-
+from app.api import auth, conversation, vocabulary, feedback, sessions
 from app.core.config import settings
 
 app = FastAPI(
@@ -37,11 +34,6 @@ app.include_router(conversation.router, prefix="/api/conversation", tags=["conve
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
 
-# WebSocket and real-time conversation endpoints
-app.include_router(websocket.router, prefix="/api", tags=["websocket", "realtime"])
-
-# Test endpoints for WebSocket system validation
-app.include_router(conversation_test.router, prefix="/api", tags=["testing", "websocket-test"])
 
 @app.get("/")
 async def root():
@@ -60,6 +52,7 @@ async def startup_event():
     
     # Import models to ensure they're registered with Base
     from app.models import conversation_v2, user, session, vocabulary
+    # Models imported for SQLAlchemy registration
     
     # Initialize database tables
     from app.core.database import create_tables, check_connection, ensure_dev_sqlite_columns
@@ -73,14 +66,11 @@ async def startup_event():
     else:
         logger.error("Database connection failed")
     
-    # Initialize conversation state manager
-    logger.info("Conversation state manager initialized")
-    
-    # Log available endpoints
-    logger.info("WebSocket endpoints available:")
-    logger.info("  - /api/ws - Simple WebSocket endpoint for frontend integration")
-    logger.info("  - /api/ws/conversations/{conversation_id} - Advanced WebSocket endpoint")
-    logger.info("  - /api/test/conversations - Test endpoints for validation")
+    # API endpoints ready
+    logger.info("HTTP API endpoints available:")
+    logger.info("  - /api/conversation - Main conversation endpoint")
+    logger.info("  - /api/sessions - Session management")
+    logger.info("  - /api/auth - Authentication")
     
     logger.info("ImprovToday backend startup complete")
 
