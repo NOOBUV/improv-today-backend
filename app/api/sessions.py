@@ -7,6 +7,7 @@ import uuid
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from sqlalchemy.exc import OperationalError
 from app.models.user import User
 from app.models.session import Session as SessionModel, SessionTranscript
@@ -52,63 +53,15 @@ class TranscriptSaveRequest(BaseModel):
     detected_vocabulary_level: Optional[str] = None
 
 @router.post("/start", response_model=SessionStartResponse)
-async def start_session(request: SessionStartRequest, response: Response, http_request: Request, db: Session = Depends(get_db)):
+async def start_session(request: SessionStartRequest, response: Response, http_request: Request, db: Session = Depends(get_db), current_user: Dict = Depends(get_current_user)):
     """
     Start a new conversation session
     Creates user if needed (for first-time anonymous users)
     """
     try:
-        user_id = request.user_id
-        # Issue or reuse anonymous identity cookie
-        anon_cookie_name = "it_user"
-        anon_uuid_value = http_request.cookies.get(anon_cookie_name)
-        if not anon_uuid_value:
-            anon_uuid_value = str(uuid.uuid4())
-            # In production, set Secure and SameSite=None; in dev, allow over http
-            secure_flag = http_request.url.scheme == "https"
-            response.set_cookie(
-                key=anon_cookie_name,
-                value=anon_uuid_value,
-                httponly=True,
-                samesite="none" if secure_flag else "lax",
-                secure=secure_flag,
-                max_age=60 * 60 * 24 * 365,  # 1 year
-                path="/",
-            )
-        
-        # Create anonymous user if none provided
-        if not user_id:
-            # Reuse existing anonymous user if cookie present
-            existing_user = None
-            if anon_uuid_value:
-                existing_user = db.query(User).filter(User.anon_uuid == anon_uuid_value).first()
-            if existing_user:
-                new_user = existing_user
-            else:
-                new_user = User(
-                    is_anonymous=True,
-                    assessment_completed=False,
-                    anon_uuid=anon_uuid_value
-                )
-            try:
-                db.add(new_user)
-                db.commit()
-                db.refresh(new_user)
-            except OperationalError as oe:
-                # Likely schema mismatch (e.g., anon_uuid column missing). Fallback: create user without anon_uuid
-                db.rollback()
-                try:
-                    new_user = User(
-                        is_anonymous=True,
-                        assessment_completed=False,
-                    )
-                    db.add(new_user)
-                    db.commit()
-                    db.refresh(new_user)
-                except Exception:
-                    db.rollback()
-                    raise
-            user_id = new_user.id
+        # Get or create user from Auth0 token (similar to conversation.py)
+        from app.api.conversation import get_or_create_user
+        user_id = get_or_create_user(db, current_user)
         
         # Create new session
         session = SessionModel(
