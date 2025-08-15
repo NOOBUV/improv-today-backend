@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.services.simple_openai import SimpleOpenAIService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from pydantic import BaseModel
@@ -25,13 +26,49 @@ class ConversationResponse(BaseModel):
     usage_analysis: Optional[Dict] = None
     success: bool = True
 
+# Helper function to get or create user from Auth0 token
+def get_or_create_user(db: Session, auth0_user: Dict) -> int:
+    """Get or create user from Auth0 claims and return user_id"""
+    from app.models.user import User
+    
+    auth0_sub = auth0_user.get("sub")
+    email = auth0_user.get("email")
+    
+    if not auth0_sub:
+        raise HTTPException(status_code=400, detail="Auth0 subject not found in token")
+    
+    # Look for existing user by auth0_sub
+    user = db.query(User).filter(User.auth0_sub == auth0_sub).first()
+    
+    if not user:
+        # Create new authenticated user
+        user = User(
+            auth0_sub=auth0_sub,
+            email=email,
+            is_anonymous=False,
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        print(f"✅ Created new user for Auth0 sub: {auth0_sub}")
+    
+    return user.id
+
 # Main endpoint that frontend expects: POST /api/conversation
 @router.post("", response_model=ConversationResponse)
-async def handle_conversation(request: ConversationRequest, db: Session = Depends(get_db)):
+async def handle_conversation(
+    request: ConversationRequest, 
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user)
+):
     """
     Main conversation endpoint - receives transcript and returns AI response with feedback
     """
     try:
+        # Get or create user from Auth0 token
+        user_id = get_or_create_user(db, current_user)
+        
         openai_service = SimpleOpenAIService()
         vocabulary_service = VocabularyTierService()
         
@@ -106,7 +143,11 @@ async def handle_conversation(request: ConversationRequest, db: Session = Depend
 
 # Add vocabulary tier analysis endpoint
 @router.post("/analyze-tier")
-async def analyze_vocabulary_tier(request: Dict, db: Session = Depends(get_db)):
+async def analyze_vocabulary_tier(
+    request: Dict, 
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user)
+):
     """Analyze vocabulary tier of provided text"""
     try:
         text = request.get("text", "")
@@ -130,8 +171,12 @@ async def analyze_vocabulary_tier(request: Dict, db: Session = Depends(get_db)):
 
 # Legacy endpoint for backward compatibility
 @router.post("/chat", response_model=ConversationResponse)
-async def chat(request: ConversationRequest, db: Session = Depends(get_db)):
-    return await handle_conversation(request, db)
+async def chat(
+    request: ConversationRequest, 
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user)
+):
+    return await handle_conversation(request, db, current_user)
 
 # Get personality options
 @router.get("/personalities")
@@ -189,8 +234,13 @@ async def get_welcome_message(personality: str = "friendly_neutral", db: Session
         }
 
 @router.get("/history")
-async def get_conversation_history(db: Session = Depends(get_db)):
-    return {"conversations": []}
+async def get_conversation_history(
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user)
+):
+    # Get user and return their conversation history
+    user_id = get_or_create_user(db, current_user)
+    return {"conversations": [], "user_id": user_id}
 
 def _estimate_fluency(transcript: str) -> int:
     """Estimate fluency based on transcript characteristics"""

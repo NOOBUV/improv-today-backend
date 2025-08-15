@@ -28,3 +28,4 @@ passlib[bcrypt]==1.7.4
 # Additional modern dependencies
 httpx==0.28.1
 typing-extensions==4.12.2
+requests

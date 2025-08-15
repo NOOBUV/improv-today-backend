@@ -1,7 +1,7 @@
 """
 New conversation models for the redesigned architecture.
 These models follow the system redesign plan with UUID primary keys,
-proper message tracking, and real-time state management.
+proper message tracking, and conversation state management.
 """
 from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
@@ -56,8 +56,8 @@ class ConversationMessage(Base):
 
 class SessionState(Base):
     """
-    Real-time session state for WebSocket synchronization.
-    Prevents race conditions and maintains conversation flow.
+    Session state for conversation management.
+    Tracks current conversation state and transcript data.
     """
     __tablename__ = "session_states"
 
