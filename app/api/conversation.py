@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.services.simple_openai import SimpleOpenAIService
+from app.services.simple_openai import SimpleOpenAIService, OpenAIConversationResponse
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
 from app.models.vocabulary import VocabularySuggestion
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import datetime
 import uuid
+import re
 
 router = APIRouter()
 
@@ -29,6 +30,7 @@ class ConversationResponse(BaseModel):
     vocabulary_tier: Optional[Dict] = None
     usage_analysis: Optional[Dict] = None
     suggestion: Optional[Dict] = None
+    used_suggestion_id: Optional[str] = None
     success: bool = True
 
 # Helper function to get or create user from Auth0 token
@@ -60,6 +62,53 @@ def get_or_create_user(db: Session, auth0_user: Dict) -> int:
     
     return user.id
 
+def get_most_recent_shown_suggestion(db: Session, user_id: str) -> Optional[VocabularySuggestion]:
+    """Get the most recent 'shown' suggestion for the user"""
+    return db.query(VocabularySuggestion).filter(
+        VocabularySuggestion.user_id == user_id,
+        VocabularySuggestion.status == "shown"
+    ).order_by(VocabularySuggestion.created_at.desc()).first()
+
+def detect_word_usage(corrected_transcript: str, suggested_word: str) -> bool:
+    """
+    Detect if the suggested word is used in the corrected transcript.
+    
+    Implements case-insensitive matching with word boundaries and plural handling.
+    Uses regex to avoid partial matches (e.g., "run" in "running").
+    
+    Args:
+        corrected_transcript: The corrected transcript text to search
+        suggested_word: The word to look for
+        
+    Returns:
+        bool: True if word is found with proper word boundaries
+        
+    Examples:
+        >>> detect_word_usage("I want to elaborate on this", "elaborate")
+        True
+        >>> detect_word_usage("I want to elaborate on this", "labor")  # partial match
+        False
+        >>> detect_word_usage("Multiple books on shelves", "book")  # plural
+        True
+    """
+    if not corrected_transcript or not suggested_word:
+        return False
+    
+    # Normalize both text and word for comparison
+    normalized_transcript = corrected_transcript.lower().strip()
+    normalized_word = suggested_word.lower().strip()
+    
+    # Create word boundary pattern to avoid partial matches
+    # This ensures "run" doesn't match in "running" but does match in "I run daily"
+    word_pattern = r'\b' + re.escape(normalized_word) + r'\b'
+    
+    # Also check for common plural forms (word + s)
+    # This handles most English plurals: book->books, cat->cats
+    plural_pattern = r'\b' + re.escape(normalized_word) + r's\b'
+    
+    return bool(re.search(word_pattern, normalized_transcript) or 
+                re.search(plural_pattern, normalized_transcript))
+
 # Main endpoint that frontend expects: POST /api/conversation
 @router.post("", response_model=ConversationResponse)
 async def handle_conversation(
@@ -90,10 +139,10 @@ async def handle_conversation(
             session_row.last_message_at = datetime.utcnow()
             db.commit()
 
-        # Analyze vocabulary tier
-        tier_analysis = vocabulary_service.analyze_vocabulary_tier(request.message)
+        # Check for existing shown suggestion for usage detection
+        recent_suggestion = get_most_recent_shown_suggestion(db, str(user_id))
+        used_suggestion_id = None
         
-        # Generate AI response with personality
         # Map minimalist personalities to existing prompt keys
         personality_map = {
             "friendly": "friendly_neutral",
@@ -102,13 +151,33 @@ async def handle_conversation(
         }
         effective_personality = personality_map.get(session_personality or "friendly", session_personality or "friendly_neutral")
 
-        ai_response = await openai_service.generate_personality_response(
+        # Generate structured AI response with corrected transcript
+        structured_response = await openai_service.generate_structured_personality_response(
             request.message,
             effective_personality,
             request.target_vocabulary,
             request.topic,
             previous_ai_reply=request.last_ai_reply,
         )
+        
+        ai_response = structured_response.ai_response
+        corrected_transcript = structured_response.corrected_transcript
+        
+        # Check if suggested word was used in corrected transcript
+        if recent_suggestion and detect_word_usage(corrected_transcript, recent_suggestion.suggested_word):
+            try:
+                # Update suggestion status to 'used' within transaction
+                recent_suggestion.status = "used"
+                db.add(recent_suggestion)
+                db.flush()  # Ensure the update is included in transaction
+                used_suggestion_id = str(recent_suggestion.id)
+                print(f"✅ Usage detected: '{recent_suggestion.suggested_word}' marked as used (ID: {used_suggestion_id})")
+            except Exception as e:
+                print(f"⚠️ Failed to update suggestion status: {str(e)}")
+                # Continue without blocking the conversation
+        
+        # Analyze vocabulary tier on corrected transcript for better accuracy
+        tier_analysis = vocabulary_service.analyze_vocabulary_tier(corrected_transcript)
         
         # Create enhanced feedback with vocabulary tier
         feedback = {
@@ -174,18 +243,22 @@ async def handle_conversation(
             except Exception:
                 pass
         
-        print(f"🎯 Conversation Request: {request.message}")
+        print(f"🎯 Original Message: {request.message}")
+        print(f"✅ Corrected Transcript: {corrected_transcript}")
         print(f"📊 Vocabulary Tier: {tier_analysis.tier} (Score: {tier_analysis.score})")
         print(f"🤖 AI Response: {ai_response}")
+        if used_suggestion_id:
+            print(f"🎉 Used Suggestion ID: {used_suggestion_id}")
         if suggestion_data:
-            print(f"💡 Suggestion: {suggestion_data['word']} - {suggestion_data['definition']}")
+            print(f"💡 New Suggestion: {suggestion_data['word']} - {suggestion_data['definition']}")
         
         return ConversationResponse(
             response=ai_response,
             feedback=feedback,
             vocabulary_tier=vocabulary_tier_data,
             usage_analysis=None,
-            suggestion=suggestion_data
+            suggestion=suggestion_data,
+            used_suggestion_id=used_suggestion_id
         )
         
     except Exception as e:

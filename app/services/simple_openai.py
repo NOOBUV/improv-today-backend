@@ -1,6 +1,6 @@
 import json
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from openai import OpenAI
 from app.core.config import settings
 
@@ -19,6 +19,15 @@ class ConversationResponse(BaseModel):
     encourage_vocabulary: List[str]
     follow_up_suggestions: List[str]
     conversation_quality_score: float
+
+class OpenAIConversationResponse(BaseModel):
+    """Structured output model for OpenAI conversation response with corrected transcript"""
+    corrected_transcript: str = Field(
+        description="Grammar and spelling corrected version of user input"
+    )
+    ai_response: str = Field(
+        description="Conversational AI response to the user"
+    )
 
 class SimpleOpenAIService:
     def __init__(self):
@@ -326,3 +335,133 @@ Example structure: Welcome message + name question + day/activity question"""
         ]
         
         return random.choice(general_responses)
+
+    async def generate_structured_personality_response(self, 
+                                                     message: str, 
+                                                     personality: str = "friendly_neutral", 
+                                                     target_vocabulary: list = None, 
+                                                     topic: str = "", 
+                                                     previous_ai_reply: Optional[str] = None) -> OpenAIConversationResponse:
+        """
+        Generate structured response with corrected transcript using OpenAI structured outputs.
+        
+        Args:
+            message: User's input message to process
+            personality: AI personality style (friendly_neutral, sassy_english, blunt_american)
+            target_vocabulary: List of vocabulary words to encourage usage
+            topic: Optional conversation topic context
+            previous_ai_reply: Previous AI response for context-aware transcription correction
+            
+        Returns:
+            OpenAIConversationResponse with corrected transcript and AI response
+            
+        Raises:
+            OpenAI API errors are handled gracefully with fallback responses
+        """
+        if not settings.openai_api_key:
+            return OpenAIConversationResponse(
+                corrected_transcript=message,
+                ai_response=self._get_smart_fallback_response(message)
+            )
+            
+        try:
+            vocab_words = [v.get("word", "") for v in target_vocabulary] if target_vocabulary else []
+            
+            # Extract personality prompt to reduce duplication
+            base_prompt = self._get_personality_prompt(personality)
+            vocab_context = self._build_vocabulary_context(vocab_words)
+            repair_context = self._build_repair_context(previous_ai_reply)
+
+            system_prompt = f"""{base_prompt}
+
+Your goals:
+1. First, correct any speech-to-text errors in the user's message for the corrected_transcript field
+2. Generate a natural, engaging conversational response that flows organically
+3. Ask follow-up questions to keep the conversation going
+4. Show genuine interest in what they're saying
+5. {vocab_context}
+6. Keep responses conversational (1-2 sentences)
+7. Let the AI naturally ask what to talk about instead of topic selection
+
+For corrected_transcript: Fix grammar, spelling, and obvious speech-to-text errors while preserving the original meaning and natural speech patterns.
+For ai_response: Be encouraging and respond authentically to what they say.
+{repair_context}
+"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User message: {message}"}
+                ],
+                max_tokens=300,
+                temperature=0.7,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "conversation_response",
+                        "strict": True,
+                        "schema": OpenAIConversationResponse.model_json_schema()
+                    }
+                }
+            )
+            
+            # Parse response directly to Pydantic object with validation
+            structured_response = OpenAIConversationResponse.model_validate_json(
+                response.choices[0].message.content
+            )
+            
+            return structured_response
+                
+        except Exception as e:
+            print(f"OpenAI structured conversation error: {str(e)}")
+            # Fallback to unstructured response with graceful degradation
+            return await self._handle_structured_response_fallback(
+                message, personality, target_vocabulary, topic, previous_ai_reply
+            )
+    
+    def _get_personality_prompt(self, personality: str) -> str:
+        """Extract personality-specific prompts to reduce code duplication."""
+        personality_prompts = {
+            "sassy_english": """You are a witty, sassy English conversation partner with a charming British accent in your responses. Be playful, slightly cheeky, but encouraging. Ask engaging questions naturally and let the conversation flow organically. Don't ask them to choose topics - instead, be curious about what they want to talk about today.""",
+            
+            "blunt_american": """You are a direct, no-nonsense American conversation partner. Be straightforward, honest, and practical in your responses while remaining supportive. Ask direct questions and get to the point. Don't ask them to choose topics - just ask what's on their mind or what they want to discuss.""",
+            
+            "friendly_neutral": """You are a warm, encouraging conversation partner. Be supportive, patient, and genuinely interested in the conversation. Ask thoughtful questions and show curiosity about their thoughts and experiences. Let the conversation develop naturally without forcing topic selection."""
+        }
+        return personality_prompts.get(personality, personality_prompts["friendly_neutral"])
+    
+    def _build_vocabulary_context(self, vocab_words: List[str]) -> str:
+        """Build vocabulary context string for prompts."""
+        return f"If appropriate, subtly encourage the use of these vocabulary words: {', '.join(vocab_words)}" if vocab_words else ""
+    
+    def _build_repair_context(self, previous_ai_reply: Optional[str]) -> str:
+        """Build transcription repair context for improved accuracy."""
+        if not previous_ai_reply:
+            return ""
+        return f"""
+You previously said: "{previous_ai_reply}"
+If the user's text appears to be a mis-transcription relative to the prior reply, infer the most likely intended sentence and respond to that intended meaning instead of the raw text. Keep changes minimal and only when the raw text is obviously wrong or incomplete.
+"""
+    
+    async def _handle_structured_response_fallback(self, 
+                                                 message: str, 
+                                                 personality: str, 
+                                                 target_vocabulary: list, 
+                                                 topic: str, 
+                                                 previous_ai_reply: Optional[str]) -> OpenAIConversationResponse:
+        """Handle fallback when structured response fails."""
+        try:
+            fallback_response = await self.generate_personality_response(
+                message, personality, target_vocabulary, topic, previous_ai_reply
+            )
+            return OpenAIConversationResponse(
+                corrected_transcript=message,  # Use original if correction fails
+                ai_response=fallback_response
+            )
+        except Exception as fallback_error:
+            print(f"Fallback response also failed: {str(fallback_error)}")
+            return OpenAIConversationResponse(
+                corrected_transcript=message,
+                ai_response=self._get_smart_fallback_response(message)
+            )
