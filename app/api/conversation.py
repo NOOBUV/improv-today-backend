@@ -4,9 +4,13 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.services.simple_openai import SimpleOpenAIService
 from app.services.vocabulary_tier_service import VocabularyTierService
+from app.services.suggestion_service import SuggestionService
+from app.models.vocabulary import VocabularySuggestion
+from app.models.conversation_v2 import Conversation
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import datetime
+import uuid
 
 router = APIRouter()
 
@@ -24,6 +28,7 @@ class ConversationResponse(BaseModel):
     feedback: Dict
     vocabulary_tier: Optional[Dict] = None
     usage_analysis: Optional[Dict] = None
+    suggestion: Optional[Dict] = None
     success: bool = True
 
 # Helper function to get or create user from Auth0 token
@@ -71,6 +76,7 @@ async def handle_conversation(
         
         openai_service = SimpleOpenAIService()
         vocabulary_service = VocabularyTierService()
+        suggestion_service = SuggestionService()
         
         # Load personality and topic from session if session_id provided
         session_personality = request.personality
@@ -126,15 +132,60 @@ async def handle_conversation(
             "recommendations": vocabulary_service.get_vocabulary_recommendations(tier_analysis.tier, [])
         }
         
+        # Generate vocabulary suggestion and save to DB
+        suggestion_data = None
+        try:
+            suggestion = suggestion_service.generate_suggestion(request.message)
+            if suggestion:
+                # Create or find conversation record for this interaction
+                conversation_id = uuid.uuid4()
+                conversation = Conversation(
+                    id=conversation_id,
+                    user_id=str(user_id),
+                    session_id=request.session_id,
+                    status='active',
+                    personality=effective_personality
+                )
+                db.add(conversation)
+                db.flush()  # Get the ID without committing
+                
+                # Save suggestion to database
+                db_suggestion = VocabularySuggestion(
+                    conversation_id=conversation_id,
+                    user_id=str(user_id),
+                    suggested_word=suggestion["word"],
+                    status="shown"
+                )
+                db.add(db_suggestion)
+                db.commit()
+                db.refresh(db_suggestion)
+                
+                suggestion_data = {
+                    "id": str(db_suggestion.id),
+                    "word": suggestion["word"],
+                    "definition": suggestion["definition"]
+                }
+        except Exception as e:
+            print(f"⚠️ Suggestion generation failed: {str(e)}")
+            # Continue without suggestion as per IV1 requirement
+            # Rollback any partial transaction
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        
         print(f"🎯 Conversation Request: {request.message}")
         print(f"📊 Vocabulary Tier: {tier_analysis.tier} (Score: {tier_analysis.score})")
         print(f"🤖 AI Response: {ai_response}")
+        if suggestion_data:
+            print(f"💡 Suggestion: {suggestion_data['word']} - {suggestion_data['definition']}")
         
         return ConversationResponse(
             response=ai_response,
             feedback=feedback,
             vocabulary_tier=vocabulary_tier_data,
-            usage_analysis=None
+            usage_analysis=None,
+            suggestion=suggestion_data
         )
         
     except Exception as e:
