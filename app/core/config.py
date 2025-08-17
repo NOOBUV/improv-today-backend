@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     environment: str = os.getenv("ENVIRONMENT", "development")
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
     
+    # Redis Configuration
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    
     # Database Connection Pool Settings
     db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
     db_max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))

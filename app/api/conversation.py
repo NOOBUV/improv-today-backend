@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.services.simple_openai import SimpleOpenAIService, OpenAIConversationResponse
+from app.services.simple_openai import SimpleOpenAIService, OpenAIConversationResponse, OpenAICoachingResponse, WordUsageStatus
+from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
 from app.models.vocabulary import VocabularySuggestion
@@ -126,6 +127,7 @@ async def handle_conversation(
         openai_service = SimpleOpenAIService()
         vocabulary_service = VocabularyTierService()
         suggestion_service = SuggestionService()
+        redis_service = RedisService()
         
         # Load personality and topic from session if session_id provided
         session_personality = request.personality
@@ -151,27 +153,67 @@ async def handle_conversation(
         }
         effective_personality = personality_map.get(session_personality or "friendly", session_personality or "friendly_neutral")
 
-        # Generate structured AI response with corrected transcript
-        structured_response = await openai_service.generate_structured_personality_response(
+        # Find existing conversation for this session or create new one
+        conversation = None
+        if request.session_id:
+            # Look for existing active conversation for this session
+            conversation = db.query(Conversation).filter(
+                Conversation.session_id == request.session_id,
+                Conversation.user_id == str(user_id),
+                Conversation.status == 'active'
+            ).first()
+        
+        if not conversation:
+            # Create new conversation if none exists
+            conversation_id = uuid.uuid4()
+            conversation = Conversation(
+                id=conversation_id,
+                user_id=str(user_id),
+                session_id=request.session_id,
+                status='active',
+                personality=effective_personality
+            )
+            db.add(conversation)
+            db.flush()  # Get the ID without committing
+        else:
+            conversation_id = conversation.id
+        
+        # Get conversation history from Redis with database fallback (AC: 1, IV1)
+        conversation_history_data = redis_service.get_conversation_history(str(conversation_id), db)
+        conversation_context = redis_service.build_conversation_context(conversation_history_data)
+        
+        # Get suggested word for usage evaluation if available
+        suggested_word = recent_suggestion.suggested_word if recent_suggestion else None
+        
+        # Generate enhanced coaching response with conversation history (AC: 2, 3, 4)
+        coaching_response = await openai_service.generate_coaching_response(
             request.message,
+            conversation_context,
             effective_personality,
             request.target_vocabulary,
-            request.topic,
-            previous_ai_reply=request.last_ai_reply,
+            suggested_word
         )
         
-        ai_response = structured_response.ai_response
-        corrected_transcript = structured_response.corrected_transcript
+        ai_response = coaching_response.ai_response
+        corrected_transcript = coaching_response.corrected_transcript
+        word_usage_status = coaching_response.word_usage_status
+        usage_feedback = coaching_response.usage_correctness_feedback
         
-        # Check if suggested word was used in corrected transcript
-        if recent_suggestion and detect_word_usage(corrected_transcript, recent_suggestion.suggested_word):
+        # Update suggestion status based on coaching response analysis (AC: 3)
+        if recent_suggestion:
             try:
-                # Update suggestion status to 'used' within transaction
-                recent_suggestion.status = "used"
+                if word_usage_status == WordUsageStatus.USED_CORRECTLY:
+                    recent_suggestion.status = "used"
+                    used_suggestion_id = str(recent_suggestion.id)
+                    print(f"✅ Word usage correct: '{recent_suggestion.suggested_word}' marked as used (ID: {used_suggestion_id})")
+                elif word_usage_status == WordUsageStatus.USED_INCORRECTLY:
+                    # Keep as "shown" but log the incorrect usage
+                    print(f"⚠️ Word used incorrectly: '{recent_suggestion.suggested_word}' - {usage_feedback}")
+                else:
+                    print(f"ℹ️ Word not used: '{recent_suggestion.suggested_word}'")
+                
                 db.add(recent_suggestion)
                 db.flush()  # Ensure the update is included in transaction
-                used_suggestion_id = str(recent_suggestion.id)
-                print(f"✅ Usage detected: '{recent_suggestion.suggested_word}' marked as used (ID: {used_suggestion_id})")
             except Exception as e:
                 print(f"⚠️ Failed to update suggestion status: {str(e)}")
                 # Continue without blocking the conversation
@@ -201,23 +243,43 @@ async def handle_conversation(
             "recommendations": vocabulary_service.get_vocabulary_recommendations(tier_analysis.tier, [])
         }
         
+        # Save conversation messages to database and Redis cache
+        try:
+            from app.models.conversation_v2 import ConversationMessage
+            
+            # Save user message to database (AC: 5 - use corrected_transcript)
+            user_message = ConversationMessage(
+                conversation_id=conversation_id,
+                role="user",
+                content=corrected_transcript,  # Use corrected transcript as per AC: 5
+                timestamp=datetime.utcnow()
+            )
+            db.add(user_message)
+            db.flush()
+            
+            # Save AI response to database
+            ai_message = ConversationMessage(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=ai_response,
+                timestamp=datetime.utcnow()
+            )
+            db.add(ai_message)
+            db.flush()
+            
+            # Cache messages in Redis for future conversation history (AC: 2)
+            redis_service.cache_message(str(conversation_id), "user", corrected_transcript, user_message.timestamp)
+            redis_service.cache_message(str(conversation_id), "assistant", ai_response, ai_message.timestamp)
+            
+        except Exception as e:
+            print(f"⚠️ Message saving failed: {str(e)}")
+            # Continue without blocking conversation
+        
         # Generate vocabulary suggestion and save to DB
         suggestion_data = None
         try:
             suggestion = suggestion_service.generate_suggestion(request.message)
             if suggestion:
-                # Create or find conversation record for this interaction
-                conversation_id = uuid.uuid4()
-                conversation = Conversation(
-                    id=conversation_id,
-                    user_id=str(user_id),
-                    session_id=request.session_id,
-                    status='active',
-                    personality=effective_personality
-                )
-                db.add(conversation)
-                db.flush()  # Get the ID without committing
-                
                 # Save suggestion to database
                 db_suggestion = VocabularySuggestion(
                     conversation_id=conversation_id,
@@ -243,20 +305,34 @@ async def handle_conversation(
             except Exception:
                 pass
         
+        # Create enhanced usage analysis with word usage feedback
+        usage_analysis = None
+        if word_usage_status != WordUsageStatus.NOT_USED:
+            usage_analysis = {
+                "word_usage_status": word_usage_status.value,
+                "suggested_word": suggested_word,
+                "usage_feedback": usage_feedback,
+                "conversation_context_used": bool(conversation_context)
+            }
+        
         print(f"🎯 Original Message: {request.message}")
         print(f"✅ Corrected Transcript: {corrected_transcript}")
         print(f"📊 Vocabulary Tier: {tier_analysis.tier} (Score: {tier_analysis.score})")
         print(f"🤖 AI Response: {ai_response}")
+        print(f"📚 Word Usage Status: {word_usage_status.value}")
+        if usage_feedback:
+            print(f"💬 Usage Feedback: {usage_feedback}")
         if used_suggestion_id:
             print(f"🎉 Used Suggestion ID: {used_suggestion_id}")
         if suggestion_data:
             print(f"💡 New Suggestion: {suggestion_data['word']} - {suggestion_data['definition']}")
+        print(f"🗨️ Conversation History Length: {len(conversation_history_data)} messages")
         
         return ConversationResponse(
             response=ai_response,
             feedback=feedback,
             vocabulary_tier=vocabulary_tier_data,
-            usage_analysis=None,
+            usage_analysis=usage_analysis,
             suggestion=suggestion_data,
             used_suggestion_id=used_suggestion_id
         )
