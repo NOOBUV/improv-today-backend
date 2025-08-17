@@ -5,7 +5,7 @@ python-multipart==0.0.18
 gunicorn==22.0.0
 
 # AI/NLP - Latest versions
-openai==1.58.1
+openai==1.99.9
 # spacy==3.4.4  # Commented out - causing build issues, not currently used
 textstat==0.7.4
 

@@ -1,5 +1,5 @@
 import json
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from app.core.config import settings
@@ -28,10 +28,14 @@ class OpenAIConversationResponse(BaseModel):
     ai_response: str = Field(
         description="Conversational AI response to the user"
     )
+    
+    class Config:
+        extra = "forbid"  # Ensures no additional properties in Pydantic model
 
 class SimpleOpenAIService:
     def __init__(self):
         self.client = OpenAI(api_key=settings.openai_api_key)
+    
     
     async def clean_and_analyze_transcript(self, original_transcript: str, context: Optional[str] = None) -> TranscriptCleaningResponse:
         """
@@ -388,28 +392,18 @@ For ai_response: Be encouraging and respond authentically to what they say.
 {repair_context}
 """
             
-            response = self.client.chat.completions.create(
+            response = self.client.responses.parse(
                 model="gpt-4o-mini",
-                messages=[
+                input=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"User message: {message}"}
                 ],
-                max_tokens=300,
+                text_format=OpenAIConversationResponse,
                 temperature=0.7,
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "conversation_response",
-                        "strict": True,
-                        "schema": OpenAIConversationResponse.model_json_schema()
-                    }
-                }
             )
             
-            # Parse response directly to Pydantic object with validation
-            structured_response = OpenAIConversationResponse.model_validate_json(
-                response.choices[0].message.content
-            )
+            # Parse the structured response
+            structured_response = response.output_parsed
             
             return structured_response
                 
