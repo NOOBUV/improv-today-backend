@@ -79,12 +79,13 @@ class AuthUtils:
             detail="Unable to find appropriate signing key"
         )
     
-    def _extract_user_info(self, payload: Dict) -> Dict:
+    async def _extract_user_info(self, payload: Dict, token: str) -> Dict:
         """
         Extract user information from token payload.
         
         Args:
             payload: The decoded JWT payload
+            token: The original access token for userinfo endpoint
             
         Returns:
             Dict: User information
@@ -101,6 +102,25 @@ class AuthUtils:
         # If no direct email, try custom namespace
         if not user_info["email"]:
             user_info["email"] = payload.get("https://improv-today-api/email")
+        
+        # If still no email, fetch from Auth0 userinfo endpoint
+        if not user_info["email"]:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        f"https://{self.auth0_domain}/userinfo",
+                        headers={"Authorization": f"Bearer {token}"}
+                    )
+                    if response.status_code == 200:
+                        userinfo = response.json()
+                        user_info["email"] = userinfo.get("email")
+                        user_info["name"] = user_info["name"] or userinfo.get("name")
+                        user_info["email_verified"] = userinfo.get("email_verified", False)
+                        logger.info(f"Retrieved user info from Auth0 userinfo endpoint for user: {user_info['email']}")
+                    else:
+                        logger.warning(f"Failed to fetch userinfo: {response.status_code}")
+            except Exception as e:
+                logger.error(f"Error fetching userinfo: {str(e)}")
         
         if not user_info["email"]:
             logger.warning(f"No email found in token payload: {payload}")
@@ -225,7 +245,7 @@ class AuthUtils:
             )
             
             # Extract and return user information
-            user_info = self._extract_user_info(payload)
+            user_info = await self._extract_user_info(payload, token)
             logger.debug(f"Verified JWT token for user: {user_info['email']}")
             
             return user_info
