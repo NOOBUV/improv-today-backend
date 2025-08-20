@@ -1,7 +1,7 @@
 import json
 import redis
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.conversation_v2 import ConversationMessage
@@ -71,7 +71,7 @@ class RedisService:
             
         try:
             if timestamp is None:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
                 
             message_data = {
                 "role": role,
@@ -229,9 +229,9 @@ class RedisService:
             return {"connected": False, "ping_success": False}
             
         try:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             client.ping()
-            response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
             
             return {
                 "connected": True,

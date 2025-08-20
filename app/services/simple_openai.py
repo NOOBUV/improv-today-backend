@@ -37,8 +37,7 @@ class OpenAIConversationResponse(BaseModel):
         description="Conversational AI response to the user"
     )
     
-    class Config:
-        extra = "forbid"  # Ensures no additional properties in Pydantic model
+    model_config = {"extra": "forbid"}  # Ensures no additional properties in Pydantic model
 
 
 class OpenAICoachingResponse(BaseModel):
@@ -63,8 +62,7 @@ class OpenAICoachingResponse(BaseModel):
         description="Feedback message only when word_usage_status is used_incorrectly, null otherwise"
     )
     
-    class Config:
-        extra = "forbid"
+    model_config = {"extra": "forbid"}
 
 class SimpleOpenAIService:
     def __init__(self):
@@ -426,18 +424,23 @@ For ai_response: Be encouraging and respond authentically to what they say.
 {repair_context}
 """
             
-            response = self.client.responses.parse(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                input=[
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"User message: {message}"}
                 ],
-                text_format=OpenAIConversationResponse,
+                max_tokens=300,
                 temperature=0.7,
+                response_format={"type": "json_schema", "json_schema": {
+                    "name": "conversation_response",
+                    "schema": OpenAIConversationResponse.model_json_schema()
+                }}
             )
             
             # Parse the structured response
-            structured_response = response.output_parsed
+            content = json.loads(response.choices[0].message.content)
+            structured_response = OpenAIConversationResponse(**content)
             
             return structured_response
                 

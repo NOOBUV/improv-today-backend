@@ -1,6 +1,6 @@
 import pytest
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 from app.services.redis_service import RedisService
 from app.models.conversation_v2 import ConversationMessage
@@ -24,8 +24,8 @@ class TestRedisService:
         # Mock database session and query
         mock_db = Mock()
         mock_messages = [
-            Mock(role="user", content="Hello", timestamp=datetime.utcnow()),
-            Mock(role="assistant", content="Hi there!", timestamp=datetime.utcnow())
+            Mock(role="user", content="Hello", timestamp=datetime.now(timezone.utc)),
+            Mock(role="assistant", content="Hi there!", timestamp=datetime.now(timezone.utc))
         ]
         mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_messages
         
@@ -133,7 +133,7 @@ class TestRedisService:
             mock_msg = Mock()
             mock_msg.role = "user" if i % 2 == 0 else "assistant"
             mock_msg.content = f"Message {i}"
-            mock_msg.timestamp = datetime.utcnow()
+            mock_msg.timestamp = datetime.now(timezone.utc)
             mock_messages.append(mock_msg)
         
         mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_messages[:15]

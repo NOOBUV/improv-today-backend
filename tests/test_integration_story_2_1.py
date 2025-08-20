@@ -111,11 +111,11 @@ class TestStory21Integration:
         with patch.object(redis_service, '_get_client', return_value=None):
             # Mock database session
             mock_db = Mock()
-            from datetime import datetime
+            from datetime import datetime, timezone
             
             mock_messages = [
-                Mock(role="user", content="Hello there", timestamp=datetime.utcnow()),
-                Mock(role="assistant", content="Hi! How are you?", timestamp=datetime.utcnow())
+                Mock(role="user", content="Hello there", timestamp=datetime.now(timezone.utc)),
+                Mock(role="assistant", content="Hi! How are you?", timestamp=datetime.now(timezone.utc))
             ]
             mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = mock_messages
             

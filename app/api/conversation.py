@@ -10,7 +10,7 @@ from app.models.vocabulary import VocabularySuggestion
 from app.models.conversation_v2 import Conversation
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import re
 
@@ -138,7 +138,7 @@ async def handle_conversation(
                 raise HTTPException(status_code=404, detail="Session not found")
             session_personality = session_personality or (session_row.personality or "friendly_neutral")
             # update last_message_at
-            session_row.last_message_at = datetime.utcnow()
+            session_row.last_message_at = datetime.now(timezone.utc)
             db.commit()
 
         # Check for existing shown suggestion for usage detection
@@ -252,7 +252,7 @@ async def handle_conversation(
                 conversation_id=conversation_id,
                 role="user",
                 content=corrected_transcript,  # Use corrected transcript as per AC: 5
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             db.add(user_message)
             db.flush()
@@ -262,7 +262,7 @@ async def handle_conversation(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=ai_response,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             db.add(ai_message)
             db.flush()
