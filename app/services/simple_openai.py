@@ -553,6 +553,22 @@ Evaluate if they used this word correctly, incorrectly, or not at all in their m
 - If used incorrectly: set word_usage_status to "used_incorrectly" and provide specific feedback
 - If not used: set word_usage_status to "not_used" and usage_correctness_feedback to null"""
 
+            # Build steering context for conversation direction (AC: 2)
+            steering_context = ""
+            if suggested_word:
+                steering_context = f"""
+CONVERSATION STEERING: When generating your ai_response, naturally steer the conversation toward topics where the word '{suggested_word}' could be relevant. Do this subtly by:
+- Asking questions that might lead to using '{suggested_word}'
+- Sharing topics or scenarios where '{suggested_word}' fits naturally
+- Transitioning to related themes without forcing the word
+- Maintaining your {personality} characteristics while steering
+- Never making it obvious you're trying to get them to use a specific word
+
+Examples of natural steering for '{suggested_word}':
+- If word is emotion-related (like "elated"): Guide toward discussing positive experiences, achievements, or exciting news
+- If word is descriptive (like "elaborate"): Ask for more details or deeper explanations about their topics
+- If word is action-related (like "contemplate"): Steer toward thoughtful discussions or decision-making scenarios"""
+
             system_prompt = f"""{base_prompt}
 
 {history_context}
@@ -565,9 +581,10 @@ Your goals:
 5. {vocab_context}
 6. Keep responses conversational (1-2 sentences)
 7. {word_evaluation_context}
+8. {steering_context}
 
 For corrected_transcript: Fix grammar, spelling, and obvious speech-to-text errors while preserving the original meaning and natural speech patterns.
-For ai_response: Be encouraging and respond authentically to what they say, building on the conversation history.
+For ai_response: Be encouraging and respond authentically to what they say, building on the conversation history. {steering_context.strip() if steering_context else ""}
 For word_usage_status and usage_correctness_feedback: Evaluate the suggested word usage carefully."""
             
             response = self.client.chat.completions.create(
