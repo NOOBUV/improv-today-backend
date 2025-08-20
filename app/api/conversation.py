@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.auth.dependencies import verify_protected_token
 from app.services.simple_openai import SimpleOpenAIService, OpenAIConversationResponse, OpenAICoachingResponse, WordUsageStatus
 from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
@@ -115,7 +115,7 @@ def detect_word_usage(corrected_transcript: str, suggested_word: str) -> bool:
 async def handle_conversation(
     request: ConversationRequest, 
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(verify_protected_token)
 ):
     """
     Main conversation endpoint - receives transcript and returns AI response with feedback
@@ -346,7 +346,7 @@ async def handle_conversation(
 async def analyze_vocabulary_tier(
     request: Dict, 
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(verify_protected_token)
 ):
     """Analyze vocabulary tier of provided text"""
     try:
@@ -374,7 +374,7 @@ async def analyze_vocabulary_tier(
 async def chat(
     request: ConversationRequest, 
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(verify_protected_token)
 ):
     return await handle_conversation(request, db, current_user)
 
@@ -436,7 +436,7 @@ async def get_welcome_message(personality: str = "friendly_neutral", db: Session
 @router.get("/history")
 async def get_conversation_history(
     db: Session = Depends(get_db),
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(verify_protected_token)
 ):
     # Get user and return their conversation history
     user_id = get_or_create_user(db, current_user)
