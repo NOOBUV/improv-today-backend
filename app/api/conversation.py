@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.dependencies import verify_protected_token
-from app.services.simple_openai import SimpleOpenAIService, OpenAIConversationResponse, OpenAICoachingResponse, WordUsageStatus
+from app.services.simple_openai import SimpleOpenAIService, OpenAICoachingResponse, WordUsageStatus
 from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
@@ -16,6 +16,8 @@ import re
 
 router = APIRouter()
 
+
+
 class ConversationRequest(BaseModel):
     message: str
     session_id: Optional[int] = None
@@ -25,6 +27,8 @@ class ConversationRequest(BaseModel):
     topic: Optional[str] = ""
     last_ai_reply: Optional[str] = None
 
+
+
 class ConversationResponse(BaseModel):
     response: str
     feedback: Dict
@@ -33,6 +37,8 @@ class ConversationResponse(BaseModel):
     suggestion: Optional[Dict] = None
     used_suggestion_id: Optional[str] = None
     success: bool = True
+
+
 
 # Helper function to get or create user from Auth0 token
 def get_or_create_user(db: Session, auth0_user: Dict) -> int:
@@ -63,12 +69,16 @@ def get_or_create_user(db: Session, auth0_user: Dict) -> int:
     
     return user.id
 
+
+
 def get_most_recent_shown_suggestion(db: Session, user_id: str) -> Optional[VocabularySuggestion]:
     """Get the most recent 'shown' suggestion for the user"""
     return db.query(VocabularySuggestion).filter(
         VocabularySuggestion.user_id == user_id,
         VocabularySuggestion.status == "shown"
     ).order_by(VocabularySuggestion.created_at.desc()).first()
+
+
 
 def detect_word_usage(corrected_transcript: str, suggested_word: str) -> bool:
     """
@@ -107,13 +117,14 @@ def detect_word_usage(corrected_transcript: str, suggested_word: str) -> bool:
     # This handles most English plurals: book->books, cat->cats
     plural_pattern = r'\b' + re.escape(normalized_word) + r's\b'
     
-    return bool(re.search(word_pattern, normalized_transcript) or 
+    return bool(re.search(word_pattern, normalized_transcript) or
                 re.search(plural_pattern, normalized_transcript))
 
 # Main endpoint that frontend expects: POST /api/conversation
 @router.post("", response_model=ConversationResponse)
+
 async def handle_conversation(
-    request: ConversationRequest, 
+    request: ConversationRequest,
     db: Session = Depends(get_db),
     current_user: Dict = Depends(verify_protected_token)
 ):
@@ -155,6 +166,8 @@ async def handle_conversation(
 
         # Find existing conversation for this session or create new one
         conversation = None
+        print(f"🔍 Looking for existing conversation - Session ID: {request.session_id}, User ID: {user_id}")
+        
         if request.session_id:
             # Look for existing active conversation for this session
             conversation = db.query(Conversation).filter(
@@ -162,10 +175,12 @@ async def handle_conversation(
                 Conversation.user_id == str(user_id),
                 Conversation.status == 'active'
             ).first()
+            print(f"🔍 Found existing conversation: {conversation.id if conversation else 'None'}")
         
         if not conversation:
             # Create new conversation if none exists
             conversation_id = uuid.uuid4()
+            print(f"📝 Creating new conversation: {conversation_id}")
             conversation = Conversation(
                 id=conversation_id,
                 user_id=str(user_id),
@@ -175,11 +190,14 @@ async def handle_conversation(
             )
             db.add(conversation)
             db.flush()  # Get the ID without committing
+            # Note: Conversation will be committed later with messages
         else:
             conversation_id = conversation.id
+            print(f"♻️ Reusing existing conversation: {conversation_id}")
         
         # Get conversation history from Redis with database fallback (AC: 1, IV1)
         conversation_history_data = redis_service.get_conversation_history(str(conversation_id), db)
+        print(f"📚 Retrieved conversation history: {len(conversation_history_data)} messages for conversation {conversation_id}")
         conversation_context = redis_service.build_conversation_context(conversation_history_data)
         
         # Get suggested word for usage evaluation if available
@@ -271,6 +289,10 @@ async def handle_conversation(
             redis_service.cache_message(str(conversation_id), "user", corrected_transcript, user_message.timestamp)
             redis_service.cache_message(str(conversation_id), "assistant", ai_response, ai_message.timestamp)
             
+            # Commit conversation and messages to ensure persistence
+            db.commit()
+            print(f"✅ Conversation and messages committed to database")
+            
         except Exception as e:
             print(f"⚠️ Message saving failed: {str(e)}")
             # Continue without blocking conversation
@@ -294,16 +316,13 @@ async def handle_conversation(
                 suggestion_data = {
                     "id": str(db_suggestion.id),
                     "word": suggestion["word"],
-                    "definition": suggestion["definition"]
+                    "definition": suggestion["definition"],
+                    "exampleSentence": suggestion["exampleSentence"]
                 }
         except Exception as e:
             print(f"⚠️ Suggestion generation failed: {str(e)}")
             # Continue without suggestion as per IV1 requirement
-            # Rollback any partial transaction
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            # Note: Don't rollback here as conversation and messages are already committed
         
         # Create enhanced usage analysis with word usage feedback
         usage_analysis = None
@@ -450,11 +469,15 @@ def _estimate_fluency(transcript: str) -> int:
     
     # Simple heuristic scoring
     base_score = 70
-    if word_count > 5: base_score += 10
-    if word_count > 10: base_score += 5
-    if avg_word_length > 4: base_score += 10
+    if word_count > 5:
+        base_score += 10
+    if word_count > 10:
+        base_score += 5
+    if avg_word_length > 4:
+        base_score += 10
     
     return min(100, base_score)
+
 
 def _generate_tier_suggestions(tier_analysis) -> List[str]:
     """Generate suggestions based on vocabulary tier analysis"""
