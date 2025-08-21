@@ -7,7 +7,7 @@ import uuid
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.auth.dependencies import verify_protected_token
 from sqlalchemy.exc import OperationalError
 from app.models.user import User
 from app.models.session import Session as SessionModel, SessionTranscript
@@ -53,7 +53,7 @@ class TranscriptSaveRequest(BaseModel):
     detected_vocabulary_level: Optional[str] = None
 
 @router.post("/start", response_model=SessionStartResponse)
-async def start_session(request: SessionStartRequest, response: Response, http_request: Request, db: Session = Depends(get_db), current_user: Dict = Depends(get_current_user)):
+async def start_session(request: SessionStartRequest, response: Response, http_request: Request, db: Session = Depends(get_db), current_user: Dict = Depends(verify_protected_token)):
     """
     Start a new conversation session
     Creates user if needed (for first-time anonymous users)

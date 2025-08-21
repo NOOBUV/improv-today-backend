@@ -3,6 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from app.core.config import settings
+from enum import Enum
 
 class TranscriptCleaningResponse(BaseModel):
     cleaned_transcript: str
@@ -20,6 +21,13 @@ class ConversationResponse(BaseModel):
     follow_up_suggestions: List[str]
     conversation_quality_score: float
 
+class WordUsageStatus(str, Enum):
+    """Enum for word usage evaluation status as per AC: 3"""
+    NOT_USED = "not_used"
+    USED_CORRECTLY = "used_correctly"
+    USED_INCORRECTLY = "used_incorrectly"
+
+
 class OpenAIConversationResponse(BaseModel):
     """Structured output model for OpenAI conversation response with corrected transcript"""
     corrected_transcript: str = Field(
@@ -29,8 +37,32 @@ class OpenAIConversationResponse(BaseModel):
         description="Conversational AI response to the user"
     )
     
-    class Config:
-        extra = "forbid"  # Ensures no additional properties in Pydantic model
+    model_config = {"extra": "forbid"}  # Ensures no additional properties in Pydantic model
+
+
+class OpenAICoachingResponse(BaseModel):
+    """
+    Enhanced structured output model for OpenAI coaching response with word usage analysis.
+    Implements AC: 3 requirements for JSON response structure.
+    """
+    corrected_transcript: str = Field(
+        ..., 
+        description="The corrected version of the user's raw transcript"
+    )
+    ai_response: str = Field(
+        ..., 
+        description="The conversational reply to the user, maintaining the selected personality"
+    )
+    word_usage_status: WordUsageStatus = Field(
+        ...,
+        description="Status of suggested word usage: not_used, used_correctly, or used_incorrectly"
+    )
+    usage_correctness_feedback: Optional[str] = Field(
+        None, 
+        description="Feedback message only when word_usage_status is used_incorrectly, null otherwise"
+    )
+    
+    model_config = {"extra": "forbid"}
 
 class SimpleOpenAIService:
     def __init__(self):
@@ -392,18 +424,23 @@ For ai_response: Be encouraging and respond authentically to what they say.
 {repair_context}
 """
             
-            response = self.client.responses.parse(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                input=[
+                messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"User message: {message}"}
                 ],
-                text_format=OpenAIConversationResponse,
+                max_tokens=300,
                 temperature=0.7,
+                response_format={"type": "json_schema", "json_schema": {
+                    "name": "conversation_response",
+                    "schema": OpenAIConversationResponse.model_json_schema()
+                }}
             )
             
             # Parse the structured response
-            structured_response = response.output_parsed
+            content = json.loads(response.choices[0].message.content)
+            structured_response = OpenAIConversationResponse(**content)
             
             return structured_response
                 
@@ -458,4 +495,146 @@ If the user's text appears to be a mis-transcription relative to the prior reply
             return OpenAIConversationResponse(
                 corrected_transcript=message,
                 ai_response=self._get_smart_fallback_response(message)
+            )
+
+    async def generate_coaching_response(self, 
+                                       message: str, 
+                                       conversation_history: str = "", 
+                                       personality: str = "friendly_neutral", 
+                                       target_vocabulary: list = None, 
+                                       suggested_word: Optional[str] = None) -> OpenAICoachingResponse:
+        """
+        Generate enhanced coaching response with conversation history and word usage analysis.
+        
+        Implements AC: 2, 3, 4 - includes conversation history in prompt and returns structured JSON
+        with word usage evaluation and feedback.
+        
+        Args:
+            message: User's raw transcript input
+            conversation_history: Formatted conversation context (~15 recent messages)
+            personality: AI personality style
+            target_vocabulary: List of vocabulary words to encourage
+            suggested_word: Previously suggested word to evaluate usage
+            
+        Returns:
+            OpenAICoachingResponse with corrected transcript, AI response, and word usage analysis
+        """
+        if not settings.openai_api_key:
+            return OpenAICoachingResponse(
+                corrected_transcript=message,
+                ai_response=self._get_smart_fallback_response(message),
+                word_usage_status=WordUsageStatus.NOT_USED,
+                usage_correctness_feedback=None
+            )
+            
+        try:
+            vocab_words = [v.get("word", "") for v in target_vocabulary] if target_vocabulary else []
+            
+            # Build personality prompt
+            base_prompt = self._get_personality_prompt(personality)
+            vocab_context = self._build_vocabulary_context(vocab_words)
+            
+            # Build conversation history context (AC: 2)
+            history_context = ""
+            if conversation_history:
+                history_context = f"""
+Recent conversation history:
+{conversation_history}
+
+Use this context to provide more relevant and coherent responses."""
+            
+            # Build word usage evaluation context (AC: 3)
+            word_evaluation_context = ""
+            if suggested_word:
+                word_evaluation_context = f"""
+IMPORTANT: The user was previously suggested to use the word "{suggested_word}".
+Evaluate if they used this word correctly, incorrectly, or not at all in their message.
+- If used correctly: set word_usage_status to "used_correctly" and usage_correctness_feedback to null
+- If used incorrectly: set word_usage_status to "used_incorrectly" and provide specific feedback
+- If not used: set word_usage_status to "not_used" and usage_correctness_feedback to null"""
+
+            # Build steering context for conversation direction (AC: 2)
+            steering_context = ""
+            if suggested_word:
+                steering_context = f"""
+CONVERSATION STEERING: When generating your ai_response, naturally steer the conversation toward topics where the word '{suggested_word}' could be relevant. Do this subtly by:
+- Asking questions that might lead to using '{suggested_word}'
+- Sharing topics or scenarios where '{suggested_word}' fits naturally
+- Transitioning to related themes without forcing the word
+- Maintaining your {personality} characteristics while steering
+- Never making it obvious you're trying to get them to use a specific word
+
+Examples of natural steering for '{suggested_word}':
+- If word is emotion-related (like "elated"): Guide toward discussing positive experiences, achievements, or exciting news
+- If word is descriptive (like "elaborate"): Ask for more details or deeper explanations about their topics
+- If word is action-related (like "contemplate"): Steer toward thoughtful discussions or decision-making scenarios"""
+
+            system_prompt = f"""{base_prompt}
+
+{history_context}
+
+Your goals:
+1. First, correct any speech-to-text errors in the user's message for the corrected_transcript field
+2. Generate a natural, engaging conversational response that flows organically with the conversation history
+3. Ask follow-up questions to keep the conversation going
+4. Show genuine interest in what they're saying
+5. {vocab_context}
+6. Keep responses conversational (1-2 sentences)
+7. {word_evaluation_context}
+8. {steering_context}
+
+For corrected_transcript: Fix grammar, spelling, and obvious speech-to-text errors while preserving the original meaning and natural speech patterns.
+For ai_response: Be encouraging and respond authentically to what they say, building on the conversation history. {steering_context.strip() if steering_context else ""}
+For word_usage_status and usage_correctness_feedback: Evaluate the suggested word usage carefully."""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User message: {message}"}
+                ],
+                max_tokens=300,
+                temperature=0.7,
+                response_format={"type": "json_schema", "json_schema": {
+                    "name": "coaching_response",
+                    "schema": OpenAICoachingResponse.model_json_schema()
+                }}
+            )
+            
+            # Parse the JSON response (AC: 4)
+            content = json.loads(response.choices[0].message.content)
+            structured_response = OpenAICoachingResponse(**content)
+            
+            return structured_response
+                
+        except Exception as e:
+            print(f"OpenAI coaching response error: {str(e)}")
+            # Fallback with graceful degradation
+            return await self._handle_coaching_response_fallback(
+                message, personality, target_vocabulary, suggested_word
+            )
+    
+    async def _handle_coaching_response_fallback(self, 
+                                               message: str, 
+                                               personality: str, 
+                                               target_vocabulary: list, 
+                                               suggested_word: Optional[str]) -> OpenAICoachingResponse:
+        """Handle fallback when coaching response fails."""
+        try:
+            fallback_response = await self.generate_personality_response(
+                message, personality, target_vocabulary
+            )
+            return OpenAICoachingResponse(
+                corrected_transcript=message,  # Use original if correction fails
+                ai_response=fallback_response,
+                word_usage_status=WordUsageStatus.NOT_USED,
+                usage_correctness_feedback=None
+            )
+        except Exception as fallback_error:
+            print(f"Coaching response fallback also failed: {str(fallback_error)}")
+            return OpenAICoachingResponse(
+                corrected_transcript=message,
+                ai_response=self._get_smart_fallback_response(message),
+                word_usage_status=WordUsageStatus.NOT_USED,
+                usage_correctness_feedback=None
             )
