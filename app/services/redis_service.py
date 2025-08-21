@@ -152,6 +152,10 @@ class RedisService:
             List of message dictionaries from database
         """
         try:
+            if db is None:
+                logger.warning("⚠️ Database session is None, cannot retrieve conversation history")
+                return []
+                
             messages = db.query(ConversationMessage).filter(
                 ConversationMessage.conversation_id == conversation_id
             ).order_by(

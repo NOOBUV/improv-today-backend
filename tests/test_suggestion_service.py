@@ -16,6 +16,7 @@ class TestSuggestionService:
         assert result is not None
         assert result["word"] == "elated"
         assert result["definition"] == "feeling or expressing great happiness and triumph"
+        assert result["exampleSentence"] == "She was elated when she received the promotion she had been working toward."
         assert result["triggered_by"] == "happy"
     
     def test_generate_suggestion_multiple_keywords(self):
@@ -96,3 +97,29 @@ class TestSuggestionService:
             assert result is not None, f"Failed to generate suggestion for '{keyword}'"
             assert result["word"] == expected_word, f"Wrong suggestion for '{keyword}'"
             assert result["triggered_by"] == keyword
+            assert "exampleSentence" in result, f"Missing exampleSentence for '{keyword}'"
+            assert isinstance(result["exampleSentence"], str), f"exampleSentence should be string for '{keyword}'"
+            assert len(result["exampleSentence"]) > 0, f"exampleSentence should not be empty for '{keyword}'"
+    
+    def test_enhanced_suggestion_structure(self):
+        """Test that enhanced suggestion structure includes all required fields"""
+        result = self.service.generate_suggestion("This is good work")
+        
+        assert result is not None
+        # Verify all required fields are present
+        assert "word" in result
+        assert "definition" in result  
+        assert "exampleSentence" in result
+        assert "triggered_by" in result
+        
+        # Verify field types
+        assert isinstance(result["word"], str)
+        assert isinstance(result["definition"], str)
+        assert isinstance(result["exampleSentence"], str)
+        assert isinstance(result["triggered_by"], str)
+        
+        # Verify field content is meaningful
+        assert len(result["word"]) > 0
+        assert len(result["definition"]) > 0
+        assert len(result["exampleSentence"]) > 0
+        assert len(result["triggered_by"]) > 0
