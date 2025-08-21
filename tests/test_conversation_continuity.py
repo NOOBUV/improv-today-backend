@@ -83,7 +83,7 @@ class TestConversationContinuity:
         )
         
         # First call - should create new conversation
-        with patch('app.api.conversation.get_current_user', return_value=mock_current_user):
+        with patch('app.api.conversation.get_or_create_user', return_value=123):
             with patch('app.api.conversation.get_db', return_value=mock_db):
                 response1 = await handle_conversation(request, mock_db, mock_current_user)
         
@@ -101,7 +101,7 @@ class TestConversationContinuity:
             personality="friendly_neutral"
         )
         
-        with patch('app.api.conversation.get_current_user', return_value=mock_current_user):
+        with patch('app.api.conversation.get_or_create_user', return_value=123):
             with patch('app.api.conversation.get_db', return_value=mock_db):
                 response2 = await handle_conversation(request2, mock_db, mock_current_user)
         
