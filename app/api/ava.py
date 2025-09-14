@@ -7,6 +7,8 @@ import uuid
 import logging
 
 from app.core.database import get_db
+from app.auth.subscription_guard import require_active_subscription
+from app.models.user import User
 from app.models.ava_state import AvaState
 from app.schemas.ava import (
     ConversationRequest, 
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 @router.post("/conversation", response_model=ConversationResponse)
 async def conversation(
     request: ConversationRequest, 
+    current_user: User = Depends(require_active_subscription),
     db: Session = Depends(get_db)
 ):
     """
@@ -40,7 +43,7 @@ async def conversation(
     - Returns structured response with emotion tagging
     """
     try:
-        logger.info(f"Processing conversation request: {request.message[:100]}...")
+        logger.info(f"Processing conversation request for user {current_user.id}: {request.message[:100]}...")
         
         # Initialize services
         content_service = CharacterContentService()

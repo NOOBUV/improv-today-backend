@@ -26,11 +26,19 @@ class User(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     
+    # Stripe integration
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
+    
     # Relationships
     sessions: Mapped[List["Session"]] = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     vocabulary_assessments: Mapped[List["VocabularyAssessment"]] = relationship("VocabularyAssessment", back_populates="user", cascade="all, delete-orphan")
     vocabulary_recommendations: Mapped[List["VocabularyRecommendation"]] = relationship("VocabularyRecommendation", back_populates="user", cascade="all, delete-orphan")
+    
+    # Subscription relationships
+    subscription: Mapped[Optional["UserSubscription"]] = relationship("UserSubscription", back_populates="user", uselist=False)
+    payment_records: Mapped[List["PaymentRecord"]] = relationship("PaymentRecord", back_populates="user", cascade="all, delete-orphan")
 
 if TYPE_CHECKING:
     from app.models.session import Session  # noqa: F401
     from app.models.vocabulary import VocabularyAssessment, VocabularyRecommendation  # noqa: F401
+    from app.models.subscription import UserSubscription, PaymentRecord  # noqa: F401

@@ -2,8 +2,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, vocabulary, feedback, sessions, ava
+from app.api import auth, conversation, vocabulary, feedback, sessions, ava, subscriptions
 from app.core.config import settings
+from app.middleware.subscription_middleware import SubscriptionMiddleware
 
 app = FastAPI(
     title="Improv Today API",
@@ -26,6 +27,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add subscription middleware for handling subscription-required responses
+app.add_middleware(SubscriptionMiddleware)
+
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
@@ -34,6 +38,7 @@ app.include_router(ava.router, prefix="/api/ava", tags=["ava"])
 
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 
 
 @app.get("/")

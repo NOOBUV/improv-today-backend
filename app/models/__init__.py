@@ -4,6 +4,7 @@ from .session import Session, SessionTranscript
 from .vocabulary import VocabularyAssessment, VocabularyRecommendation, VocabularyUsage, VocabularySuggestion
 from .conversation_v2 import Conversation, ConversationMessage, SessionState, UserPreferences
 from .ava_state import AvaState
+from .subscription import SubscriptionPlan, UserSubscription, PaymentRecord
 
 __all__ = [
     "User",
@@ -17,5 +18,8 @@ __all__ = [
     "ConversationMessage", 
     "SessionState",
     "UserPreferences",
-    "AvaState"
+    "AvaState",
+    "SubscriptionPlan",
+    "UserSubscription",
+    "PaymentRecord"
 ]

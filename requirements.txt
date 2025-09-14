@@ -32,3 +32,6 @@ requests
 
 # Redis for caching and conversation history
 redis==5.2.1
+
+# Payment Processing - Stripe integration
+stripe==11.1.1
