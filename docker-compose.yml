@@ -31,8 +31,8 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ENVIRONMENT=development
-      # Example Redis URL for future use in code: redis://redis:6379/0
-      # REDIS_URL=redis://redis:6379/0
+      # Redis URL for Celery and simulation engine
+      - REDIS_URL=redis://redis:6379/0
     restart: unless-stopped
     networks:
       - improv

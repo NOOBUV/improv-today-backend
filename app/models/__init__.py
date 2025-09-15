@@ -5,21 +5,26 @@ from .vocabulary import VocabularyAssessment, VocabularyRecommendation, Vocabula
 from .conversation_v2 import Conversation, ConversationMessage, SessionState, UserPreferences
 from .ava_state import AvaState
 from .subscription import SubscriptionPlan, UserSubscription, PaymentRecord
+from .simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
 
 __all__ = [
     "User",
-    "Session", 
+    "Session",
     "SessionTranscript",
     "VocabularyAssessment",
-    "VocabularyRecommendation", 
+    "VocabularyRecommendation",
     "VocabularyUsage",
     "VocabularySuggestion",
     "Conversation",
-    "ConversationMessage", 
+    "ConversationMessage",
     "SessionState",
     "UserPreferences",
     "AvaState",
     "SubscriptionPlan",
     "UserSubscription",
-    "PaymentRecord"
+    "PaymentRecord",
+    "GlobalEvents",
+    "AvaGlobalState",
+    "SimulationLog",
+    "SimulationConfig"
 ]
