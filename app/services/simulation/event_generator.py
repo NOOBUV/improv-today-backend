@@ -11,9 +11,10 @@ from celery import shared_task
 import asyncio
 
 from app.core.database import SessionLocal
-from app.schemas.simulation_schemas import GlobalEventCreate, EventType, MoodImpact, ImpactLevel
+from app.schemas.simulation_schemas import GlobalEventCreate, EventType, MoodImpact, ImpactLevel, GlobalEventUpdate
 from app.services.simulation.repository import SimulationRepository
 from app.services.simulation.event_patterns import EventPatterns
+from app.services.consciousness_generator_service import ConsciousnessGeneratorService
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,72 @@ def generate_daily_event(self):
         self.retry(countdown=300, max_retries=3)  # Retry after 5 minutes, max 3 times
 
 
+@shared_task(bind=True, name="app.services.simulation.event_generator.generate_consciousness_response")
+def generate_consciousness_response(self, event_id: str):
+    """
+    Celery task to generate consciousness response for an event.
+    Called asynchronously after event creation to avoid blocking the main loop.
+    """
+    try:
+        logger.info(f"Starting consciousness generation for event {event_id}")
+
+        # Create event loop for async consciousness generation
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            async def _generate_consciousness():
+                # Get database session
+                from app.core.database import get_async_session
+                async for db_session in get_async_session():
+                    try:
+                        repo = SimulationRepository(db_session)
+                        consciousness_service = ConsciousnessGeneratorService()
+
+                        # Get the event
+                        event = await repo.get_global_event(event_id)
+                        if not event:
+                            logger.error(f"Event {event_id} not found for consciousness generation")
+                            return {"success": False, "error": "Event not found"}
+
+                        # Generate consciousness response
+                        consciousness_response = await consciousness_service.generate_consciousness_response(event)
+
+                        # Update event with consciousness data
+                        update_data = GlobalEventUpdate(
+                            emotional_reaction=consciousness_response.emotional_reaction,
+                            chosen_action=consciousness_response.chosen_action,
+                            internal_thoughts=consciousness_response.internal_thoughts,
+                            consciousness_raw_response=consciousness_response.raw_response,
+                            processed_at=datetime.utcnow()
+                        )
+
+                        updated_event = await repo.update_global_event(event_id, update_data)
+
+                        logger.info(f"Generated consciousness response for event {event_id}")
+                        return {
+                            "success": True,
+                            "event_id": event_id,
+                            "consciousness_success": consciousness_response.success,
+                            "has_fallback": not consciousness_response.success
+                        }
+
+                    except Exception as e:
+                        logger.error(f"Error in consciousness generation for event {event_id}: {e}")
+                        raise
+                    finally:
+                        await db_session.close()
+
+            result = loop.run_until_complete(_generate_consciousness())
+            return result
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Error in generate_consciousness_response task for event {event_id}: {e}")
+        self.retry(countdown=300, max_retries=3)  # Retry after 5 minutes, max 3 times
+
+
 @shared_task(bind=True, name="app.services.simulation.event_generator.process_pending_events")
 def process_pending_events(self):
     """
@@ -273,11 +340,17 @@ def process_pending_events(self):
 
                 processed_count = 0
                 for event in pending_events:
-                    # Mark as processed
-                    event.status = EventStatus.PROCESSED
-                    event.processed_at = datetime.utcnow()
-                    processed_count += 1
-                    logger.debug(f"Processed event {event.event_id}")
+                    # Trigger consciousness generation for events that don't have it yet
+                    if not event.emotional_reaction:
+                        # Trigger async consciousness generation
+                        generate_consciousness_response.delay(event.event_id)
+                        logger.info(f"Triggered consciousness generation for event {event.event_id}")
+                    else:
+                        # Mark as processed if consciousness already exists
+                        event.status = EventStatus.PROCESSED
+                        event.processed_at = datetime.utcnow()
+                        processed_count += 1
+                        logger.debug(f"Event {event.event_id} already has consciousness response")
 
                 db_session.commit()
                 logger.info(f"Processed {processed_count} pending events")

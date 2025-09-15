@@ -68,6 +68,24 @@ class GlobalEvents(Base):
         comment="Expected stress impact: 'increase', 'decrease', 'neutral'"
     )
 
+    # Consciousness response data
+    emotional_reaction: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Ava's emotional reaction to this event"
+    )
+    chosen_action: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Action Ava chose in response to this event"
+    )
+    internal_thoughts: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Ava's internal thoughts about this event"
+    )
+    consciousness_raw_response: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Raw LLM response for debugging"
+    )
+
     # Processing metadata
     processed_at: Mapped[Optional[DateTime]] = mapped_column(
         DateTime(timezone=True),

@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 import logging
 
@@ -34,10 +35,47 @@ def create_database_engine():
     
     return engine
 
-# Create engine
+# Create engines
 engine = create_database_engine()
 
+# Create async engine for async operations
+def create_async_database_engine():
+    """Create async database engine with appropriate configuration based on database type"""
+    database_url = settings.database_url
+    # Convert to async driver
+    if database_url.startswith('postgresql://') or database_url.startswith('postgresql+psycopg://'):
+        # Use psycopg async for PostgreSQL (asyncpg not available in container)
+        database_url = database_url.replace('postgresql://', 'postgresql+psycopg://', 1)
+        # Keep psycopg as is if already specified
+    elif database_url.startswith('sqlite'):
+        # Use aiosqlite for SQLite async
+        database_url = database_url.replace('sqlite:///', 'sqlite+aiosqlite:///', 1)
+
+    if database_url.startswith('sqlite'):
+        # SQLite configuration
+        async_engine = create_async_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            echo=settings.debug,
+        )
+    else:
+        # PostgreSQL configuration
+        async_engine = create_async_engine(
+            database_url,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_pre_ping=True,
+            echo=settings.debug,
+        )
+
+    return async_engine
+
+# Create both sync and async engines
+async_engine = create_async_database_engine()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
 class Base(DeclarativeBase):
     pass
@@ -53,6 +91,19 @@ def get_db():
         raise
     finally:
         db.close()
+
+
+async def get_async_session():
+    """Dependency for getting async database session"""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception as e:
+            logger.error(f"Async database session error: {e}")
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 def create_tables():
     """Create all tables in the database.
