@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     
+    
     @property
     def is_development(self) -> bool:
         return self.environment == "development"

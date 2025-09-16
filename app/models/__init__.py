@@ -7,6 +7,7 @@ from .ava_state import AvaState
 from .session_state import UserSessionState, StateChangeHistory, SessionStateBackup
 from .subscription import SubscriptionPlan, UserSubscription, PaymentRecord
 from .simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
+from .journal import JournalEntries, JournalGenerationLog, JournalTemplate
 
 __all__ = [
     "User",
@@ -30,5 +31,8 @@ __all__ = [
     "GlobalEvents",
     "AvaGlobalState",
     "SimulationLog",
-    "SimulationConfig"
+    "SimulationConfig",
+    "JournalEntries",
+    "JournalGenerationLog",
+    "JournalTemplate"
 ]
