@@ -289,7 +289,11 @@ def generate_consciousness_response(self, event_id: str):
 
                         updated_event = await repo.update_global_event(event_id, update_data)
 
-                        logger.info(f"Generated consciousness response for event {event_id}")
+                        # Trigger state impact processing for the event
+                        from app.services.simulation.state_manager import process_event_impacts
+                        process_event_impacts.delay()
+
+                        logger.info(f"Generated consciousness response for event {event_id} and triggered state processing")
                         return {
                             "success": True,
                             "event_id": event_id,
@@ -351,6 +355,10 @@ def process_pending_events(self):
                         event.processed_at = datetime.utcnow()
                         processed_count += 1
                         logger.debug(f"Event {event.event_id} already has consciousness response")
+
+                        # Trigger state impact processing for events with consciousness
+                        from app.services.simulation.state_manager import process_event_impacts
+                        process_event_impacts.delay()
 
                 db_session.commit()
                 logger.info(f"Processed {processed_count} pending events")

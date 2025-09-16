@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, vocabulary, feedback, sessions, ava, subscriptions
+from app.api import auth, conversation, vocabulary, feedback, sessions, ava, subscriptions, state
 from app.api.simulation import admin as simulation_admin
 from app.core.config import settings
 from app.middleware.subscription_middleware import SubscriptionMiddleware
@@ -43,6 +43,9 @@ app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 
 # Simulation engine admin routes
 app.include_router(simulation_admin.router, prefix="/api/simulation", tags=["simulation"])
+
+# State management routes
+app.include_router(state.router, tags=["state"])
 
 
 @app.get("/")

@@ -4,11 +4,12 @@ Handles Ava's global state updates based on generated events.
 """
 
 import logging
-from typing import Dict, Any, Optional
-from datetime import datetime
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
 from celery import shared_task
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
+import json
 
 from app.core.database import SessionLocal, get_async_session
 from app.schemas.simulation_schemas import AvaGlobalStateUpdate, TrendDirection
@@ -61,6 +62,9 @@ class StateManagerService:
                             "reason": change_info["reason"]
                         }
 
+                    # Log state changes for audit trail
+                    await self._log_state_changes(repo, event.event_id, change_summary)
+
                     logger.info(f"Applied {len(state_changes)} state changes for event {event.event_id}")
                     return {
                         "success": True,
@@ -77,6 +81,255 @@ class StateManagerService:
         except Exception as e:
             logger.error(f"Error in process_event_impact: {e}")
             raise
+
+    async def process_consciousness_emotional_reactions(
+        self,
+        event: GlobalEvents,
+        consciousness_response: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Process consciousness response emotional reactions to update global state.
+        This method analyzes the emotional_reaction field from consciousness generation
+        and applies appropriate state adjustments beyond basic event impacts.
+
+        Args:
+            event: The source GlobalEvent that generated the consciousness response
+            consciousness_response: Dict containing emotional_reaction, chosen_action, internal_thoughts
+
+        Returns:
+            Summary of additional state changes made based on emotional reactions
+        """
+        try:
+            logger.info(f"Processing consciousness emotional reactions for event {event.event_id}")
+
+            emotional_reaction = consciousness_response.get("emotional_reaction", "")
+            internal_thoughts = consciousness_response.get("internal_thoughts", "")
+
+            if not emotional_reaction:
+                logger.warning(f"No emotional reaction found in consciousness response for event {event.event_id}")
+                return {"success": False, "reason": "No emotional reaction to process"}
+
+            db_session_gen = get_async_session()
+            db_session = await db_session_gen.__anext__()
+            try:
+                repo = SimulationRepository(db_session)
+
+                # Analyze emotional reactions for additional state changes
+                emotional_state_changes = self._analyze_emotional_reactions(
+                    emotional_reaction, internal_thoughts, event
+                )
+
+                # Apply emotional state changes
+                change_summary = {}
+                for trait_name, change_info in emotional_state_changes.items():
+                    updated_state = await self._update_trait_state(
+                        repo, trait_name, change_info, event.event_id
+                    )
+                    change_summary[trait_name] = {
+                        "previous_value": change_info.get("previous_value"),
+                        "new_value": updated_state.numeric_value,
+                        "change_amount": change_info["change_amount"],
+                        "reason": change_info["reason"]
+                    }
+
+                # Log emotional processing for audit trail
+                await self._log_emotional_processing(
+                    repo, event.event_id, emotional_reaction, change_summary
+                )
+
+                logger.info(f"Applied {len(emotional_state_changes)} emotional state changes for event {event.event_id}")
+                return {
+                    "success": True,
+                    "event_id": event.event_id,
+                    "emotional_changes": change_summary,
+                    "processed_reaction": emotional_reaction[:100] + "..." if len(emotional_reaction) > 100 else emotional_reaction
+                }
+
+            except Exception as e:
+                logger.error(f"Error processing emotional reactions: {e}")
+                raise
+            finally:
+                await db_session.close()
+
+        except Exception as e:
+            logger.error(f"Error in process_consciousness_emotional_reactions: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _analyze_emotional_reactions(
+        self,
+        emotional_reaction: str,
+        internal_thoughts: str,
+        event: GlobalEvents
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Analyze emotional reactions and internal thoughts to determine additional state changes.
+        This method looks for emotional keywords and patterns to apply nuanced state adjustments.
+        """
+        changes = {}
+        emotional_text = f"{emotional_reaction} {internal_thoughts}".lower()
+
+        # Emotional intensity patterns for mood adjustments
+        intense_positive_words = ["thrilled", "ecstatic", "overjoyed", "elated", "amazing", "fantastic", "incredible"]
+        intense_negative_words = ["devastated", "heartbroken", "furious", "terrified", "overwhelmed", "crushed"]
+        mild_positive_words = ["happy", "pleased", "content", "satisfied", "relieved", "grateful"]
+        mild_negative_words = ["disappointed", "annoyed", "concerned", "worried", "frustrated", "tired"]
+
+        # Stress-related emotional patterns
+        stress_increase_words = ["anxious", "worried", "stressed", "overwhelmed", "pressure", "panic", "tense"]
+        stress_decrease_words = ["calm", "relaxed", "peaceful", "serene", "relieved", "centered"]
+
+        # Energy-related emotional patterns
+        energy_increase_words = ["excited", "energized", "motivated", "inspired", "pumped", "invigorated"]
+        energy_decrease_words = ["exhausted", "drained", "tired", "depleted", "weary", "sluggish"]
+
+        # Analyze mood changes based on emotional intensity
+        mood_change = 0
+        if any(word in emotional_text for word in intense_positive_words):
+            mood_change = 8
+        elif any(word in emotional_text for word in mild_positive_words):
+            mood_change = 4
+        elif any(word in emotional_text for word in intense_negative_words):
+            mood_change = -10
+        elif any(word in emotional_text for word in mild_negative_words):
+            mood_change = -3
+
+        if mood_change != 0:
+            changes["mood"] = {
+                "change_amount": mood_change,
+                "reason": f"Emotional reaction analysis: {emotional_reaction[:50]}..."
+            }
+
+        # Analyze stress changes
+        stress_change = 0
+        if any(word in emotional_text for word in stress_increase_words):
+            stress_change = 6
+        elif any(word in emotional_text for word in stress_decrease_words):
+            stress_change = -5
+
+        if stress_change != 0:
+            changes["stress"] = {
+                "change_amount": stress_change,
+                "reason": f"Stress reaction from consciousness: {emotional_reaction[:50]}..."
+            }
+
+        # Analyze energy changes
+        energy_change = 0
+        if any(word in emotional_text for word in energy_increase_words):
+            energy_change = 5
+        elif any(word in emotional_text for word in energy_decrease_words):
+            energy_change = -4
+
+        if energy_change != 0:
+            changes["energy"] = {
+                "change_amount": energy_change,
+                "reason": f"Energy shift from consciousness: {emotional_reaction[:50]}..."
+            }
+
+        # Event-specific emotional processing
+        if event.event_type == "social":
+            # Social events can affect social satisfaction based on emotional tone
+            if mood_change > 0:
+                changes["social_satisfaction"] = {
+                    "change_amount": 3,
+                    "reason": "Positive social emotional experience"
+                }
+            elif mood_change < -5:
+                changes["social_satisfaction"] = {
+                    "change_amount": -4,
+                    "reason": "Negative social emotional experience"
+                }
+
+        logger.debug(f"Emotional analysis found {len(changes)} additional state changes")
+        return changes
+
+    async def _log_state_changes(
+        self,
+        repo: Any,
+        event_id: str,
+        change_summary: Dict[str, Any]
+    ) -> None:
+        """Log state changes for audit trail and time-series tracking."""
+        try:
+            # Create audit log entry for state changes
+            audit_data = {
+                "event_id": event_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "change_type": "event_impact",
+                "changes": change_summary,
+                "total_changes": len(change_summary)
+            }
+
+            # Store in audit log (this will need StateChangeHistory model)
+            logger.info(f"State change audit: {event_id} -> {len(change_summary)} changes")
+            # TODO: Implement actual audit log storage when StateChangeHistory model is created
+
+        except Exception as e:
+            logger.error(f"Error logging state changes: {e}")
+
+    async def _log_emotional_processing(
+        self,
+        repo: Any,
+        event_id: str,
+        emotional_reaction: str,
+        change_summary: Dict[str, Any]
+    ) -> None:
+        """Log emotional processing results for audit trail."""
+        try:
+            # Create audit log entry for emotional processing
+            audit_data = {
+                "event_id": event_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "change_type": "emotional_processing",
+                "emotional_reaction_excerpt": emotional_reaction[:200],
+                "changes": change_summary,
+                "total_changes": len(change_summary)
+            }
+
+            logger.info(f"Emotional processing audit: {event_id} -> {len(change_summary)} emotional changes")
+            # TODO: Implement actual audit log storage when StateChangeHistory model is created
+
+        except Exception as e:
+            logger.error(f"Error logging emotional processing: {e}")
+
+    async def get_state_history(
+        self,
+        trait_name: Optional[str] = None,
+        hours_back: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        Get time-series state tracking data for analysis.
+
+        Args:
+            trait_name: Specific trait to get history for (None for all traits)
+            hours_back: Number of hours of history to retrieve
+
+        Returns:
+            List of state changes with timestamps for analysis
+        """
+        try:
+            db_session_gen = get_async_session()
+            db_session = await db_session_gen.__anext__()
+            try:
+                repo = SimulationRepository(db_session)
+
+                if trait_name:
+                    # Get history for specific trait
+                    history = await repo.get_trait_history(trait_name, hours_back)
+                else:
+                    # Get history for all traits
+                    history = await repo.get_all_traits_history(hours_back)
+
+                return history
+
+            except Exception as e:
+                logger.error(f"Error getting state history: {e}")
+                return []
+            finally:
+                await db_session.close()
+
+        except Exception as e:
+            logger.error(f"Error in get_state_history: {e}")
+            return []
 
     def _calculate_state_changes(self, event: GlobalEvents) -> Dict[str, Dict[str, Any]]:
         """Calculate how an event should affect Ava's state traits."""
@@ -246,7 +499,7 @@ class StateManagerService:
                                 "value": str(config["default"]),
                                 "numeric_value": config["default"],
                                 "trend": "stable",
-                                "last_updated": datetime.utcnow().isoformat(),
+                                "last_updated": datetime.now(timezone.utc).isoformat(),
                                 "last_change_reason": "Default value"
                             }
 
@@ -334,7 +587,7 @@ def process_event_impacts(self):
                         from app.schemas.simulation_schemas import GlobalEventUpdate, EventStatus
                         update_data = GlobalEventUpdate(
                             status=EventStatus.PROCESSED,
-                            processed_at=datetime.utcnow()
+                            processed_at=datetime.now(timezone.utc)
                         )
                         await repo.update_global_event(event.event_id, update_data)
 

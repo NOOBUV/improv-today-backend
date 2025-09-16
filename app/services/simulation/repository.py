@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from app.models.simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
@@ -290,7 +290,7 @@ class SimulationRepository:
     async def get_event_statistics(self, days: int = 7) -> Dict[str, Any]:
         """Get event generation statistics for the last N days."""
         try:
-            start_date = datetime.utcnow() - timedelta(days=days)
+            start_date = datetime.now(timezone.utc) - timedelta(days=days)
 
             # Total events count
             total_result = await self.db.execute(
@@ -327,4 +327,82 @@ class SimulationRepository:
 
         except Exception as e:
             logger.error(f"Error getting event statistics: {e}")
+            raise
+
+    async def get_trait_history(self, trait_name: str, hours_back: int = 24) -> List[Dict[str, Any]]:
+        """
+        Get time-series history for a specific trait.
+
+        Args:
+            trait_name: The trait to get history for
+            hours_back: Number of hours back to retrieve
+
+        Returns:
+            List of state changes with timestamps for the trait
+        """
+        try:
+            start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+
+            result = await self.db.execute(
+                select(AvaGlobalState)
+                .where(and_(
+                    AvaGlobalState.trait_name == trait_name,
+                    AvaGlobalState.last_updated >= start_time
+                ))
+                .order_by(AvaGlobalState.last_updated.asc())
+            )
+
+            states = result.scalars().all()
+            return [
+                {
+                    "trait_name": state.trait_name,
+                    "value": state.value,
+                    "numeric_value": state.numeric_value,
+                    "timestamp": state.last_updated.isoformat(),
+                    "change_reason": state.change_reason,
+                    "trend": state.trend,
+                    "last_event_id": state.last_event_id
+                }
+                for state in states
+            ]
+
+        except Exception as e:
+            logger.error(f"Error getting trait history for {trait_name}: {e}")
+            raise
+
+    async def get_all_traits_history(self, hours_back: int = 24) -> List[Dict[str, Any]]:
+        """
+        Get time-series history for all traits.
+
+        Args:
+            hours_back: Number of hours back to retrieve
+
+        Returns:
+            List of state changes with timestamps for all traits
+        """
+        try:
+            start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+
+            result = await self.db.execute(
+                select(AvaGlobalState)
+                .where(AvaGlobalState.last_updated >= start_time)
+                .order_by(AvaGlobalState.last_updated.asc())
+            )
+
+            states = result.scalars().all()
+            return [
+                {
+                    "trait_name": state.trait_name,
+                    "value": state.value,
+                    "numeric_value": state.numeric_value,
+                    "timestamp": state.last_updated.isoformat(),
+                    "change_reason": state.change_reason,
+                    "trend": state.trend,
+                    "last_event_id": state.last_event_id
+                }
+                for state in states
+            ]
+
+        except Exception as e:
+            logger.error(f"Error getting all traits history: {e}")
             raise
