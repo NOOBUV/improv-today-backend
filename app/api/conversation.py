@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.dependencies import verify_protected_token
 from app.services.simple_openai import SimpleOpenAIService, OpenAICoachingResponse, WordUsageStatus
+from app.services.enhanced_conversation_service import EnhancedConversationService
 from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
@@ -37,6 +38,8 @@ class ConversationResponse(BaseModel):
     suggestion: Optional[Dict] = None
     used_suggestion_id: Optional[str] = None
     remediation_feedback: Optional[str] = None  # AC: 4 - Include remediation feedback in API response
+    simulation_context: Optional[Dict] = None  # New field for simulation integration
+    selected_backstory_types: Optional[List[str]] = None  # What backstory content was used
     success: bool = True
 
 
@@ -135,8 +138,9 @@ async def handle_conversation(
     try:
         # Get or create user from Auth0 token
         user_id = get_or_create_user(db, current_user)
-        
+
         openai_service = SimpleOpenAIService()
+        enhanced_conversation_service = EnhancedConversationService()
         vocabulary_service = VocabularyTierService()
         suggestion_service = SuggestionService()
         redis_service = RedisService()
@@ -217,19 +221,53 @@ async def handle_conversation(
                 should_replace_suggestion = True
                 print(f"🔄 Graceful replacement: {turns_since_suggestion} turns since suggestion created")
         
-        # Generate enhanced coaching response with conversation history (AC: 2, 3, 4)
-        coaching_response = await openai_service.generate_coaching_response(
-            request.message,
-            conversation_context,
-            effective_personality,
-            request.target_vocabulary,
-            suggested_word
-        )
-        
-        ai_response = coaching_response.ai_response
-        corrected_transcript = coaching_response.corrected_transcript
-        word_usage_status = coaching_response.word_usage_status
-        usage_feedback = coaching_response.usage_correctness_feedback
+        # Generate enhanced coaching response with simulation context integration (Story 2.6)
+        try:
+            # Retrieve user preferences from session for personalization
+            from app.services.session_state_service import SessionStateService
+            session_service = SessionStateService()
+            try:
+                session_state = await session_service.get_session_state(str(user_id), str(conversation_id))
+                user_preferences = session_state.get("personalization", {}) if session_state else {}
+            except Exception as e:
+                print(f"⚠️ Could not retrieve session personalization, using defaults: {str(e)}")
+                user_preferences = {}
+
+            enhanced_response = await enhanced_conversation_service.generate_enhanced_response(
+                user_message=request.message,
+                user_id=str(user_id),
+                conversation_id=str(conversation_id),
+                conversation_history=conversation_context,
+                personality=effective_personality,
+                target_vocabulary=request.target_vocabulary,
+                suggested_word=suggested_word,
+                user_preferences=user_preferences
+            )
+
+            ai_response = enhanced_response["ai_response"]
+            corrected_transcript = enhanced_response["corrected_transcript"]
+            word_usage_status = enhanced_response["word_usage_status"]
+            usage_feedback = enhanced_response["usage_correctness_feedback"]
+            simulation_context = enhanced_response.get("simulation_context", {})
+            selected_backstory_types = enhanced_response.get("selected_backstory_types", [])
+
+        except Exception as e:
+            print(f"⚠️ Enhanced conversation service failed, falling back to simple service: {str(e)}")
+            # Fallback to original service
+            coaching_response = await openai_service.generate_coaching_response(
+                request.message,
+                conversation_context,
+                effective_personality,
+                request.target_vocabulary,
+                suggested_word
+            )
+
+            ai_response = coaching_response.ai_response
+            corrected_transcript = coaching_response.corrected_transcript
+            word_usage_status = coaching_response.word_usage_status
+            usage_feedback = coaching_response.usage_correctness_feedback
+            simulation_context = None
+            selected_backstory_types = None
         
         # Update suggestion status based on coaching response analysis (AC: 3, 4)
         if recent_suggestion:
@@ -386,7 +424,9 @@ async def handle_conversation(
             usage_analysis=usage_analysis,
             suggestion=suggestion_data,
             used_suggestion_id=used_suggestion_id,
-            remediation_feedback=usage_feedback  # AC: 4 - Include remediation feedback in response
+            remediation_feedback=usage_feedback,  # AC: 4 - Include remediation feedback in response
+            simulation_context=simulation_context,  # Story 2.6 - Simulation context integration
+            selected_backstory_types=selected_backstory_types  # Story 2.6 - Backstory content used
         )
         
     except Exception as e:

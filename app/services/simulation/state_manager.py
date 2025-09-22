@@ -16,6 +16,7 @@ from app.schemas.simulation_schemas import AvaGlobalStateUpdate, TrendDirection
 from app.services.simulation.repository import SimulationRepository
 from app.models.simulation import GlobalEvents
 from app.models.ava_state import AvaState
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,21 @@ class StateManagerService:
             "work_satisfaction": {"min": 0, "max": 100, "default": 65},
             "personal_fulfillment": {"min": 0, "max": 100, "default": 55}
         }
+
+        # Performance optimization caches
+        self._global_state_cache = {}
+        self._global_state_cache_timestamp = 0
+        self._global_state_cache_ttl = 300  # 5 minutes in seconds
+
+        self._recent_events_cache = {}
+        self._recent_events_cache_timestamp = 0
+        self._recent_events_cache_ttl = 600  # 10 minutes in seconds
+
+        # Circuit breaker for performance optimization
+        self._circuit_breaker_failures = 0
+        self._circuit_breaker_threshold = 3
+        self._circuit_breaker_timeout = 30
+        self._circuit_breaker_last_failure = 0
 
     async def process_event_impact(self, event: GlobalEvents) -> Dict[str, Any]:
         """
@@ -475,8 +491,20 @@ class StateManagerService:
             raise
 
     async def get_current_global_state(self) -> Dict[str, Any]:
-        """Get Ava's current global state summary."""
+        """Get Ava's current global state summary with caching optimization."""
         try:
+            # Check cache first
+            current_time = time.time()
+            if (self._global_state_cache and
+                current_time - self._global_state_cache_timestamp < self._global_state_cache_ttl):
+                logger.debug("Returning cached global state")
+                return self._global_state_cache
+
+            # Circuit breaker check
+            if self._is_circuit_breaker_open():
+                logger.warning("Circuit breaker open, returning fallback global state")
+                return self._get_fallback_global_state()
+
             async for db_session in get_async_session():
                 try:
                     repo = SimulationRepository(db_session)
@@ -503,9 +531,18 @@ class StateManagerService:
                                 "last_change_reason": "Default value"
                             }
 
+                    # Cache the result
+                    self._global_state_cache = state_summary
+                    self._global_state_cache_timestamp = current_time
+                    logger.debug("Cached global state successfully")
+
+                    # Reset circuit breaker on success
+                    self._circuit_breaker_failures = 0
+
                     return state_summary
 
                 except Exception as e:
+                    self._record_circuit_breaker_failure()
                     logger.error(f"Error getting current global state: {e}")
                     raise
                 finally:
@@ -513,6 +550,10 @@ class StateManagerService:
 
         except Exception as e:
             logger.error(f"Error in get_current_global_state: {e}")
+            # Return fallback if cache exists
+            if self._global_state_cache:
+                logger.warning("Returning stale cached global state due to error")
+                return self._global_state_cache
             raise
 
     async def initialize_default_states(self) -> Dict[str, Any]:
@@ -557,6 +598,167 @@ class StateManagerService:
         except Exception as e:
             logger.error(f"Error in initialize_default_states: {e}")
             raise
+
+    async def get_recent_events(
+        self,
+        hours_back: int = 24,
+        max_count: int = 5,
+        event_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent simulation events for conversation context with caching optimization.
+
+        Args:
+            hours_back: Number of hours back to look for events
+            max_count: Maximum number of events to return
+            event_type: Optional filter by event type
+
+        Returns:
+            List of recent events with relevant context information
+        """
+        try:
+            # Create cache key based on parameters
+            cache_key = f"{hours_back}_{max_count}_{event_type or 'all'}"
+
+            # Check cache first
+            current_time = time.time()
+            if (cache_key in self._recent_events_cache and
+                current_time - self._recent_events_cache_timestamp < self._recent_events_cache_ttl):
+                logger.debug("Returning cached recent events")
+                return self._recent_events_cache[cache_key]
+
+            # Circuit breaker check
+            if self._is_circuit_breaker_open():
+                logger.warning("Circuit breaker open, returning empty events list")
+                return []
+
+            from datetime import timedelta
+
+            end_time = datetime.now(timezone.utc)
+            start_time = end_time - timedelta(hours=hours_back)
+
+            async for db_session in get_async_session():
+                try:
+                    repo = SimulationRepository(db_session)
+
+                    # Get events by timeframe
+                    from app.schemas.simulation_schemas import EventType
+                    filter_type = None
+                    if event_type:
+                        try:
+                            filter_type = EventType(event_type)
+                        except ValueError:
+                            logger.warning(f"Invalid event type filter: {event_type}")
+
+                    events = await repo.get_events_by_timeframe(
+                        start_time=start_time,
+                        end_time=end_time,
+                        event_type=filter_type
+                    )
+
+                    # Limit the number of events
+                    events = events[:max_count]
+
+                    # Convert to conversation-friendly format
+                    conversation_events = []
+                    for event in events:
+                        conversation_events.append({
+                            "event_id": event.event_id,
+                            "event_type": event.event_type,
+                            "summary": event.summary,
+                            "timestamp": event.timestamp.isoformat(),
+                            "intensity": event.intensity,
+                            "impact_mood": event.impact_mood,
+                            "impact_energy": event.impact_energy,
+                            "impact_stress": event.impact_stress,
+                            "hours_ago": (end_time - event.timestamp).total_seconds() / 3600
+                        })
+
+                    # Cache the result
+                    self._recent_events_cache[cache_key] = conversation_events
+                    self._recent_events_cache_timestamp = current_time
+                    logger.debug(f"Cached {len(conversation_events)} recent events")
+
+                    # Reset circuit breaker on success
+                    self._circuit_breaker_failures = 0
+
+                    logger.info(f"Retrieved {len(conversation_events)} recent events for conversation context")
+                    return conversation_events
+
+                except Exception as e:
+                    self._record_circuit_breaker_failure()
+                    logger.error(f"Error getting recent events: {e}")
+                    return []
+                finally:
+                    await db_session.close()
+
+        except Exception as e:
+            logger.error(f"Error in get_recent_events: {e}")
+            return []
+
+    def _is_circuit_breaker_open(self) -> bool:
+        """Check if circuit breaker is open (preventing calls due to failures)."""
+        if self._circuit_breaker_failures < self._circuit_breaker_threshold:
+            return False
+
+        # Check if timeout has passed
+        current_time = time.time()
+        if current_time - self._circuit_breaker_last_failure > self._circuit_breaker_timeout:
+            # Reset circuit breaker after timeout
+            self._circuit_breaker_failures = 0
+            return False
+
+        return True
+
+    def _record_circuit_breaker_failure(self):
+        """Record a failure for circuit breaker tracking."""
+        self._circuit_breaker_failures += 1
+        self._circuit_breaker_last_failure = time.time()
+        logger.warning(f"Circuit breaker failure recorded: {self._circuit_breaker_failures}/{self._circuit_breaker_threshold}")
+
+    def _get_fallback_global_state(self) -> Dict[str, Any]:
+        """Get fallback global state when services are unavailable."""
+        fallback_state = {}
+        for trait_name, config in self.core_traits.items():
+            fallback_state[trait_name] = {
+                "value": str(config["default"]),
+                "numeric_value": config["default"],
+                "trend": "stable",
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "last_change_reason": "Fallback default value"
+            }
+        logger.info("Using fallback global state")
+        return fallback_state
+
+    def clear_cache(self):
+        """Clear all caches for fresh data retrieval."""
+        self._global_state_cache = {}
+        self._global_state_cache_timestamp = 0
+        self._recent_events_cache = {}
+        self._recent_events_cache_timestamp = 0
+        logger.info("All caches cleared")
+
+    def get_cache_status(self) -> Dict[str, Any]:
+        """Get cache status for monitoring and debugging."""
+        current_time = time.time()
+        return {
+            "global_state_cache": {
+                "enabled": bool(self._global_state_cache),
+                "age_seconds": current_time - self._global_state_cache_timestamp if self._global_state_cache else 0,
+                "ttl_seconds": self._global_state_cache_ttl
+            },
+            "recent_events_cache": {
+                "enabled": bool(self._recent_events_cache),
+                "age_seconds": current_time - self._recent_events_cache_timestamp if self._recent_events_cache else 0,
+                "ttl_seconds": self._recent_events_cache_ttl
+            },
+            "circuit_breaker": {
+                "failures": self._circuit_breaker_failures,
+                "threshold": self._circuit_breaker_threshold,
+                "is_open": self._is_circuit_breaker_open(),
+                "time_since_last_failure": current_time - self._circuit_breaker_last_failure if self._circuit_breaker_last_failure else 0
+            }
+        }
 
 
 # Celery task for processing event impacts

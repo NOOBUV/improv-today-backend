@@ -15,7 +15,7 @@ load_dotenv()
 celery_app = Celery("improv_today")
 
 # Redis configuration (using existing Redis from subscription system)
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6378/0")
 
 # Celery configuration
 celery_app.conf.update(
