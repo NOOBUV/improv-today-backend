@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey, Float
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -86,3 +87,21 @@ class VocabularyUsage(Base):
     
     # Relationships
     session = relationship("Session", back_populates="vocabulary_usage")
+
+class VocabularySuggestion(Base):
+    __tablename__ = "vocabulary_suggestions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
+    user_id = Column(String(255), nullable=False)
+    
+    # Suggestion details
+    suggested_word = Column(String, nullable=False)
+    status = Column(String, default="shown")  # 'shown', 'used'
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    conversation = relationship("Conversation", foreign_keys=[conversation_id])  # Reference to conversation_v2

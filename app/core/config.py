@@ -18,11 +18,17 @@ class Settings(BaseSettings):
     auth0_domain: str = os.getenv("AUTH0_DOMAIN", "")
     auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "")
     auth0_issuer: str = os.getenv("AUTH0_ISSUER", "")
+    auth0_client_secret: str = os.getenv("AUTH0_CLIENT_SECRET", "")
     jwt_algorithms: str = os.getenv("JWT_ALGORITHMS", "RS256")
+    auth0_mgmt_client_id: str = os.getenv("AUTH0_MGMT_CLIENT_ID", "")
+    auth0_mgmt_client_secret: str = os.getenv("AUTH0_MGMT_CLIENT_SECRET", "")
     
     # Application Settings
     environment: str = os.getenv("ENVIRONMENT", "development")
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
+    
+    # Redis Configuration
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     
     # Database Connection Pool Settings
     db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))

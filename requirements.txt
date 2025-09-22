@@ -5,7 +5,7 @@ python-multipart==0.0.18
 gunicorn==22.0.0
 
 # AI/NLP - Latest versions
-openai==1.58.1
+openai==1.99.9
 # spacy==3.4.4  # Commented out - causing build issues, not currently used
 textstat==0.7.4
 
@@ -21,11 +21,14 @@ pydantic==2.10.5
 pydantic-settings==2.8.0
 python-dotenv==1.0.1
 
-# Authentication & Security - Updated versions
-python-jose[cryptography]==3.3.0
+# Authentication & Security - Auth0 JWT validation
+pyjwt[crypto]==2.9.0
 passlib[bcrypt]==1.7.4
 
 # Additional modern dependencies
 httpx==0.28.1
 typing-extensions==4.12.2
 requests
+
+# Redis for caching and conversation history
+redis==5.2.1

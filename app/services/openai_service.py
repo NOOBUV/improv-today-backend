@@ -41,7 +41,7 @@ class OpenAIService:
             ]
             
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=150,
                 temperature=0.7
@@ -79,7 +79,7 @@ Be encouraging and respond naturally to what they say."""
             ]
             
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=100,
                 temperature=0.8
