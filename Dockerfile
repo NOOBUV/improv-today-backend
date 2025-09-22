@@ -27,4 +27,4 @@ ENV WEB_CONCURRENCY=2
 ENV WORKER_CLASS=uvicorn.workers.UvicornWorker
 
 # Default command - can be overridden in docker-compose
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
