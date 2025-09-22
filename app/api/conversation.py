@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.dependencies import verify_protected_token
 from app.services.simple_openai import SimpleOpenAIService, OpenAICoachingResponse, WordUsageStatus
+from app.services.enhanced_conversation_service import EnhancedConversationService
 from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
@@ -36,6 +37,9 @@ class ConversationResponse(BaseModel):
     usage_analysis: Optional[Dict] = None
     suggestion: Optional[Dict] = None
     used_suggestion_id: Optional[str] = None
+    remediation_feedback: Optional[str] = None  # AC: 4 - Include remediation feedback in API response
+    simulation_context: Optional[Dict] = None  # New field for simulation integration
+    selected_backstory_types: Optional[List[str]] = None  # What backstory content was used
     success: bool = True
 
 
@@ -71,11 +75,11 @@ def get_or_create_user(db: Session, auth0_user: Dict) -> int:
 
 
 
-def get_most_recent_shown_suggestion(db: Session, user_id: str) -> Optional[VocabularySuggestion]:
-    """Get the most recent 'shown' suggestion for the user"""
+def get_most_recent_active_suggestion(db: Session, user_id: str) -> Optional[VocabularySuggestion]:
+    """Get the most recent active suggestion for the user (shown or used_incorrectly)"""
     return db.query(VocabularySuggestion).filter(
         VocabularySuggestion.user_id == user_id,
-        VocabularySuggestion.status == "shown"
+        VocabularySuggestion.status.in_(["shown", "used_incorrectly"])  # AC: 5 - Include incorrectly used suggestions
     ).order_by(VocabularySuggestion.created_at.desc()).first()
 
 
@@ -134,8 +138,9 @@ async def handle_conversation(
     try:
         # Get or create user from Auth0 token
         user_id = get_or_create_user(db, current_user)
-        
+
         openai_service = SimpleOpenAIService()
+        enhanced_conversation_service = EnhancedConversationService()
         vocabulary_service = VocabularyTierService()
         suggestion_service = SuggestionService()
         redis_service = RedisService()
@@ -152,8 +157,8 @@ async def handle_conversation(
             session_row.last_message_at = datetime.now(timezone.utc)
             db.commit()
 
-        # Check for existing shown suggestion for usage detection
-        recent_suggestion = get_most_recent_shown_suggestion(db, str(user_id))
+        # Check for existing active suggestion for usage detection (AC: 5)
+        recent_suggestion = get_most_recent_active_suggestion(db, str(user_id))
         used_suggestion_id = None
         
         # Map minimalist personalities to existing prompt keys
@@ -203,21 +208,68 @@ async def handle_conversation(
         # Get suggested word for usage evaluation if available
         suggested_word = recent_suggestion.suggested_word if recent_suggestion else None
         
-        # Generate enhanced coaching response with conversation history (AC: 2, 3, 4)
-        coaching_response = await openai_service.generate_coaching_response(
-            request.message,
-            conversation_context,
-            effective_personality,
-            request.target_vocabulary,
-            suggested_word
-        )
+        # Check for graceful suggestion replacement (IV2)
+        should_replace_suggestion = False
+        if recent_suggestion and suggested_word:
+            # Count conversation turns since suggestion was created
+            turns_since_suggestion = len([msg for msg in conversation_history_data 
+                                        if msg.get('timestamp') and 
+                                        msg.get('timestamp') > recent_suggestion.created_at.isoformat()])
+            
+            # Replace suggestion after 3-4 turns without any usage attempt
+            if turns_since_suggestion >= 4:  # 4 turns = 2 user messages + 2 AI responses
+                should_replace_suggestion = True
+                print(f"🔄 Graceful replacement: {turns_since_suggestion} turns since suggestion created")
         
-        ai_response = coaching_response.ai_response
-        corrected_transcript = coaching_response.corrected_transcript
-        word_usage_status = coaching_response.word_usage_status
-        usage_feedback = coaching_response.usage_correctness_feedback
+        # Generate enhanced coaching response with simulation context integration (Story 2.6)
+        try:
+            # Retrieve user preferences from session for personalization
+            from app.services.session_state_service import SessionStateService
+            session_service = SessionStateService()
+            try:
+                session_state = await session_service.get_session_state(str(user_id), str(conversation_id))
+                user_preferences = session_state.get("personalization", {}) if session_state else {}
+            except Exception as e:
+                print(f"⚠️ Could not retrieve session personalization, using defaults: {str(e)}")
+                user_preferences = {}
+
+            enhanced_response = await enhanced_conversation_service.generate_enhanced_response(
+                user_message=request.message,
+                user_id=str(user_id),
+                conversation_id=str(conversation_id),
+                conversation_history=conversation_context,
+                personality=effective_personality,
+                target_vocabulary=request.target_vocabulary,
+                suggested_word=suggested_word,
+                user_preferences=user_preferences
+            )
+
+            ai_response = enhanced_response["ai_response"]
+            corrected_transcript = enhanced_response["corrected_transcript"]
+            word_usage_status = enhanced_response["word_usage_status"]
+            usage_feedback = enhanced_response["usage_correctness_feedback"]
+            simulation_context = enhanced_response.get("simulation_context", {})
+            selected_backstory_types = enhanced_response.get("selected_backstory_types", [])
+
+        except Exception as e:
+            print(f"⚠️ Enhanced conversation service failed, falling back to simple service: {str(e)}")
+            # Fallback to original service
+            coaching_response = await openai_service.generate_coaching_response(
+                request.message,
+                conversation_context,
+                effective_personality,
+                request.target_vocabulary,
+                suggested_word
+            )
+
+            ai_response = coaching_response.ai_response
+            corrected_transcript = coaching_response.corrected_transcript
+            word_usage_status = coaching_response.word_usage_status
+            usage_feedback = coaching_response.usage_correctness_feedback
+            simulation_context = None
+            selected_backstory_types = None
         
-        # Update suggestion status based on coaching response analysis (AC: 3)
+        # Update suggestion status based on coaching response analysis (AC: 3, 4)
         if recent_suggestion:
             try:
                 if word_usage_status == WordUsageStatus.USED_CORRECTLY:
@@ -225,13 +277,22 @@ async def handle_conversation(
                     used_suggestion_id = str(recent_suggestion.id)
                     print(f"✅ Word usage correct: '{recent_suggestion.suggested_word}' marked as used (ID: {used_suggestion_id})")
                 elif word_usage_status == WordUsageStatus.USED_INCORRECTLY:
-                    # Keep as "shown" but log the incorrect usage
+                    # Update status to track incorrect usage (AC: 4)
+                    recent_suggestion.status = "used_incorrectly"
                     print(f"⚠️ Word used incorrectly: '{recent_suggestion.suggested_word}' - {usage_feedback}")
+                elif should_replace_suggestion:
+                    # Graceful replacement without negative feedback (IV2)
+                    recent_suggestion.status = "ignored"
+                    print(f"🔄 Gracefully replacing suggestion '{recent_suggestion.suggested_word}' after timeout")
+                    # Save the status change to database first
+                    db.add(recent_suggestion)
+                    db.flush()  # Ensure the update is included in transaction
+                    # Clear the recent_suggestion since it's now ignored and should not block new suggestions
+                    recent_suggestion = None
                 else:
                     print(f"ℹ️ Word not used: '{recent_suggestion.suggested_word}'")
-                
-                db.add(recent_suggestion)
-                db.flush()  # Ensure the update is included in transaction
+                    db.add(recent_suggestion)
+                    db.flush()  # Ensure the update is included in transaction
             except Exception as e:
                 print(f"⚠️ Failed to update suggestion status: {str(e)}")
                 # Continue without blocking the conversation
@@ -299,30 +360,39 @@ async def handle_conversation(
         
         # Generate vocabulary suggestion and save to DB
         suggestion_data = None
-        try:
-            suggestion = suggestion_service.generate_suggestion(request.message)
-            if suggestion:
-                # Save suggestion to database
-                db_suggestion = VocabularySuggestion(
-                    conversation_id=conversation_id,
-                    user_id=str(user_id),
-                    suggested_word=suggestion["word"],
-                    status="shown"
-                )
-                db.add(db_suggestion)
-                db.commit()
-                db.refresh(db_suggestion)
-                
-                suggestion_data = {
-                    "id": str(db_suggestion.id),
-                    "word": suggestion["word"],
-                    "definition": suggestion["definition"],
-                    "exampleSentence": suggestion["exampleSentence"]
-                }
-        except Exception as e:
-            print(f"⚠️ Suggestion generation failed: {str(e)}")
-            # Continue without suggestion as per IV1 requirement
-            # Note: Don't rollback here as conversation and messages are already committed
+        
+        # Generate new suggestion if no active suggestion or if graceful replacement needed
+        if not recent_suggestion or should_replace_suggestion or word_usage_status == WordUsageStatus.USED_CORRECTLY:
+            print(f"🔍 Suggestion generation condition met: recent_suggestion={bool(recent_suggestion)}, should_replace={should_replace_suggestion}, word_usage={word_usage_status}")
+            try:
+                suggestion = suggestion_service.generate_suggestion(request.message)
+                print(f"🔍 Suggestion service returned: {suggestion}")
+                if suggestion:
+                    # Save suggestion to database
+                    db_suggestion = VocabularySuggestion(
+                        conversation_id=conversation_id,
+                        user_id=str(user_id),
+                        suggested_word=suggestion["word"],
+                        status="shown"
+                    )
+                    db.add(db_suggestion)
+                    db.commit()
+                    db.refresh(db_suggestion)
+                    
+                    suggestion_data = {
+                        "id": str(db_suggestion.id),
+                        "word": suggestion["word"],
+                        "definition": suggestion["definition"],
+                        "exampleSentence": suggestion["exampleSentence"]
+                    }
+                    
+                    if should_replace_suggestion:
+                        print(f"🔄 Generated replacement suggestion: {suggestion['word']}")
+                        
+            except Exception as e:
+                print(f"⚠️ Suggestion generation failed: {str(e)}")
+                # Continue without suggestion as per IV1 requirement
+                # Note: Don't rollback here as conversation and messages are already committed
         
         # Create enhanced usage analysis with word usage feedback
         usage_analysis = None
@@ -353,7 +423,10 @@ async def handle_conversation(
             vocabulary_tier=vocabulary_tier_data,
             usage_analysis=usage_analysis,
             suggestion=suggestion_data,
-            used_suggestion_id=used_suggestion_id
+            used_suggestion_id=used_suggestion_id,
+            remediation_feedback=usage_feedback,  # AC: 4 - Include remediation feedback in response
+            simulation_context=simulation_context,  # Story 2.6 - Simulation context integration
+            selected_backstory_types=selected_backstory_types  # Story 2.6 - Backstory content used
         )
         
     except Exception as e:

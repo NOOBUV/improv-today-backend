@@ -548,10 +548,19 @@ Use this context to provide more relevant and coherent responses."""
             if suggested_word:
                 word_evaluation_context = f"""
 IMPORTANT: The user was previously suggested to use the word "{suggested_word}".
-Evaluate if they used this word correctly, incorrectly, or not at all in their message.
+
+Based on the conversation history and the user's latest raw transcript, perform these steps:
+1. First, analyze and correct the user's raw transcript.
+2. Based on the corrected transcript, check if the user attempted to use the suggested word '{suggested_word}'.
+3. If they used it INCORRECTLY (wrong context, grammar, etc.), provide brief, encouraging feedback in the 'usage_correctness_feedback' field.
+4. If they used it CORRECTLY or DID NOT use it, the 'usage_correctness_feedback' field MUST be null.
+
+Evaluation rules:
 - If used correctly: set word_usage_status to "used_correctly" and usage_correctness_feedback to null
-- If used incorrectly: set word_usage_status to "used_incorrectly" and provide specific feedback
-- If not used: set word_usage_status to "not_used" and usage_correctness_feedback to null"""
+- If used incorrectly: set word_usage_status to "used_incorrectly" and provide specific, brief encouraging feedback explaining the error
+- If not used: set word_usage_status to "not_used" and usage_correctness_feedback to null
+
+The correctness evaluation is ONLY triggered if the suggested word is detected in the user's corrected transcript. If the word is not present, the usage_correctness_feedback field must be null."""
 
             # Build steering context for conversation direction (AC: 2)
             steering_context = ""

@@ -3,17 +3,36 @@ from .user import User
 from .session import Session, SessionTranscript
 from .vocabulary import VocabularyAssessment, VocabularyRecommendation, VocabularyUsage, VocabularySuggestion
 from .conversation_v2 import Conversation, ConversationMessage, SessionState, UserPreferences
+from .ava_state import AvaState
+from .session_state import UserSessionState, StateChangeHistory, SessionStateBackup
+from .subscription import SubscriptionPlan, UserSubscription, PaymentRecord
+from .simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
+from .journal import JournalEntries, JournalGenerationLog, JournalTemplate
 
 __all__ = [
     "User",
-    "Session", 
+    "Session",
     "SessionTranscript",
     "VocabularyAssessment",
-    "VocabularyRecommendation", 
+    "VocabularyRecommendation",
     "VocabularyUsage",
     "VocabularySuggestion",
     "Conversation",
-    "ConversationMessage", 
+    "ConversationMessage",
     "SessionState",
-    "UserPreferences"
+    "UserPreferences",
+    "AvaState",
+    "UserSessionState",
+    "StateChangeHistory",
+    "SessionStateBackup",
+    "SubscriptionPlan",
+    "UserSubscription",
+    "PaymentRecord",
+    "GlobalEvents",
+    "AvaGlobalState",
+    "SimulationLog",
+    "SimulationConfig",
+    "JournalEntries",
+    "JournalGenerationLog",
+    "JournalTemplate"
 ]
