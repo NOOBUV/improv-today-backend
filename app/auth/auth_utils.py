@@ -99,6 +99,12 @@ class AuthUtils:
             "email_verified": payload.get("email_verified", False)
         }
         
+        # Preserve all custom claims from the payload
+        # This ensures roles and other custom claims are available
+        for key, value in payload.items():
+            if key not in user_info:  # Don't override standard claims
+                user_info[key] = value
+        
         # If no direct email, try custom namespace
         if not user_info["email"]:
             user_info["email"] = payload.get("https://improv-today-api/email")

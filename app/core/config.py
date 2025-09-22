@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     db_max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
     db_pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     
+    # Stripe Configuration
+    stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe_publishable_key: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    
+    
     @property
     def is_development(self) -> bool:
         return self.environment == "development"

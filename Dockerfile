@@ -26,13 +26,5 @@ ENV ENVIRONMENT=$ENVIRONMENT
 ENV WEB_CONCURRENCY=2
 ENV WORKER_CLASS=uvicorn.workers.UvicornWorker
 
-# Start with Gunicorn in production; fall back to uvicorn with reload in development
-CMD bash -lc 'if [ "$ENVIRONMENT" = "development" ]; then \
-  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload; \
-else \
-  exec gunicorn app.main:app \
-    --bind 0.0.0.0:8000 \
-    --workers ${WEB_CONCURRENCY} \
-    --worker-class ${WORKER_CLASS} \
-    --timeout 60; \
-fi'
+# Default command - can be overridden in docker-compose
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -32,3 +32,10 @@ requests
 
 # Redis for caching and conversation history
 redis==5.2.1
+
+# Celery for background tasks and simulation engine
+celery[redis]==5.4.0
+celery[eventlet]==5.4.0
+
+# Payment Processing - Stripe integration
+stripe==11.1.1

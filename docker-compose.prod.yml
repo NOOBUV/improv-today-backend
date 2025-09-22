@@ -1,39 +1,38 @@
-networks:
-  improv:
-    driver: bridge
-
-volumes:
-  redis_data:
-
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # In prod, keep Redis internal (no published ports)
-    volumes:
-      - redis_data:/data
-    networks:
-      - improv
+    command: redis-server --appendonly yes
 
-  backend:
-    build:
-      context: .
-      args:
-        ENVIRONMENT: production
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: /opt/improv-today/improv-today-backend.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis
-    # Bind container to localhost only so Nginx on host can proxy, not exposed publicly
-    ports:
-      - "127.0.0.1:8000:8000"
-    env_file:
-      - /opt/improv-today/improv-today-backend.env
-    environment:
-      # Example Redis URL for future use: redis://redis:6379/0
-      # REDIS_URL: redis://redis:6379/0
-      WEB_CONCURRENCY: 2
-      WORKER_CLASS: uvicorn.workers.UvicornWorker
     restart: unless-stopped
-    networks:
-      - improv
+
+  worker:
+    build: .
+    command: celery -A celery_app worker --loglevel=info
+    env_file: /opt/improv-today/improv-today-backend.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  beat:
+    build: .
+    command: celery -A celery_app beat --loglevel=info
+    env_file: /opt/improv-today/improv-today-backend.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
 
 
