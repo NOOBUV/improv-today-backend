@@ -19,9 +19,9 @@ class TestCharacterContentService:
     
     def test_init_sets_correct_base_path(self, content_service):
         """Test that initialization sets correct content base path"""
-        expected_path = Path(__file__).parent.parent / "content" / "ava"
+        expected_path = Path(__file__).parent.parent / "content" / "clara"
         # The path might be different in test environment, just check structure
-        assert content_service.content_base_path.name == "ava"
+        assert content_service.content_base_path.name == "clara"
         assert content_service.content_base_path.parent.name == "content"
     
     @patch("pathlib.Path.exists")

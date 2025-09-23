@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, vocabulary, feedback, sessions, ava, subscriptions, state
+from app.api import auth, conversation, vocabulary, feedback, sessions, clara, subscriptions, state
 from app.api.simulation import admin as simulation_admin
 from app.api.admin import journal as admin_journal
 from app.core.config import settings
@@ -36,7 +36,7 @@ app.add_middleware(SubscriptionMiddleware)
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(conversation.router, prefix="/api/conversation", tags=["conversation"])
-app.include_router(ava.router, prefix="/api/ava", tags=["ava"])
+app.include_router(clara.router, prefix="/api/clara", tags=["clara"])
 
 app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
@@ -69,7 +69,7 @@ async def startup_event():
     logger.info("Initializing ImprovToday backend services...")
     
     # Import models to ensure they're registered with Base
-    from app.models import conversation_v2, user, session, vocabulary, ava_state
+    from app.models import conversation_v2, user, session, vocabulary, clara_state
     # Models imported for SQLAlchemy registration
     
     # Initialize database tables

@@ -9,7 +9,7 @@ from datetime import datetime, date, time, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, and_, func
 
-from app.models.simulation import GlobalEvents, AvaGlobalState
+from app.models.simulation import GlobalEvents, ClaraGlobalState
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +115,9 @@ class DailyAggregatorService:
         try:
             # Get current emotional state
             result = await session.execute(
-                select(AvaGlobalState)
+                select(ClaraGlobalState)
                 .where(
-                    AvaGlobalState.trait_name.in_(["mood", "stress", "energy", "confidence"])
+                    ClaraGlobalState.trait_name.in_(["mood", "stress", "energy", "confidence"])
                 )
             )
             states = result.scalars().all()

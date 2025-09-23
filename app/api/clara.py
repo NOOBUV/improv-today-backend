@@ -9,19 +9,19 @@ import logging
 from app.core.database import get_db
 from app.auth.subscription_guard import require_active_subscription
 from app.models.user import User
-from app.models.ava_state import AvaState
-from app.schemas.ava import (
-    ConversationRequest, 
-    ConversationResponse, 
+from app.models.clara_state import ClaraState
+from app.schemas.clara import (
+    ConversationRequest,
+    ConversationResponse,
     EmotionalState,
     EmotionType,
-    AvaStateRead,
-    AvaStateCreate,
-    AvaStateUpdate
+    ClaraStateRead,
+    ClaraStateCreate,
+    ClaraStateUpdate
 )
 from app.services.character_content_service import CharacterContentService
 from app.services.conversation_prompt_service import ConversationPromptService, EmotionType as ServiceEmotionType
-from app.services.ava_llm_service import AvaLLMService
+from app.services.clara_llm_service import ClaraLLMService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,10 +34,10 @@ async def conversation(
     db: Session = Depends(get_db)
 ):
     """
-    Main conversation endpoint for interacting with Ava.
-    
+    Main conversation endpoint for interacting with Clara.
+
     Implements Story 1.4: V0 Conversational Logic
-    - Loads Ava's backstory and guiding principles
+    - Loads Clara's backstory and guiding principles
     - Constructs LLM prompt with foundational context
     - Calls premium LLM for authentic responses
     - Returns structured response with emotion tagging
@@ -48,18 +48,18 @@ async def conversation(
         # Initialize services
         content_service = CharacterContentService()
         prompt_service = ConversationPromptService()
-        llm_service = AvaLLMService()
+        llm_service = ClaraLLMService()
         
         # Generate conversation ID
         conversation_id = request.conversation_id or str(uuid.uuid4())
         
-        # Load Ava's character content (AC: 1)
-        logger.info("Loading Ava's character content...")
+        # Load Clara's character content (AC: 1)
+        logger.info("Loading Clara's character content...")
         character_backstory = content_service.get_consolidated_backstory()
         
         if not character_backstory:
             logger.warning("No character content loaded, using minimal backstory")
-            character_backstory = "You are Ava, a bright, dry-witted 22-year-old creative strategist."
+            character_backstory = "You are Clara, a bright, dry-witted 22-year-old creative strategist."
         
         # Determine conversation emotion based on user message (AC: 4)
         conversation_emotion, emotion_reasoning = prompt_service.determine_emotion_from_context(
@@ -83,19 +83,19 @@ async def conversation(
         logger.info(f"Constructed conversation prompt: {len(conversation_prompt)} characters")
         
         # Generate response using OpenAI API (AC: 3)
-        ava_response = await llm_service.generate_ava_response(
+        clara_response = await llm_service.generate_clara_response(
             prompt=conversation_prompt,
             max_tokens=200,
             temperature=0.8,
             timeout=30
         )
         
-        if not ava_response.success:
+        if not clara_response.success:
             logger.warning("LLM service returned fallback response")
         
         # Construct emotional state for response
         emotional_state = EmotionalState(
-            emotion=EmotionType(ava_response.emotion.value),
+            emotion=EmotionType(clara_response.emotion.value),
             mood=conversation_emotion.value,
             energy=7,  # Default values - could be enhanced with state management
             stress=6   # Normalized stress level (1-10 scale) based on story requirements
@@ -103,15 +103,15 @@ async def conversation(
         
         # Build final response (AC: 5)
         response = ConversationResponse(
-            message=ava_response.message,
-            emotion=EmotionType(ava_response.emotion.value),
+            message=clara_response.message,
+            emotion=EmotionType(clara_response.emotion.value),
             emotional_state=emotional_state,
             timestamp=datetime.now(),
             conversation_id=conversation_id,
             context_used=False  # No conversation history used in V0
         )
         
-        logger.info(f"Generated response: {ava_response.message[:100]}... (emotion: {ava_response.emotion})")
+        logger.info(f"Generated response: {clara_response.message[:100]}... (emotion: {clara_response.emotion})")
         
         return response
         
@@ -123,17 +123,17 @@ async def conversation(
         )
 
 
-@router.get("/state", response_model=List[AvaStateRead])
-async def get_ava_states(db: Session = Depends(get_db)):
-    """Get all Ava's current state traits."""
-    states = db.query(AvaState).all()
+@router.get("/state", response_model=List[ClaraStateRead])
+async def get_clara_states(db: Session = Depends(get_db)):
+    """Get all Clara's current state traits."""
+    states = db.query(ClaraState).all()
     return states
 
 
-@router.get("/state/{trait_name}", response_model=AvaStateRead)
-async def get_ava_state(trait_name: str, db: Session = Depends(get_db)):
+@router.get("/state/{trait_name}", response_model=ClaraStateRead)
+async def get_clara_state(trait_name: str, db: Session = Depends(get_db)):
     """Get a specific state trait by name."""
-    state = db.query(AvaState).filter(AvaState.trait_name == trait_name).first()
+    state = db.query(ClaraState).filter(ClaraState.trait_name == trait_name).first()
     if not state:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -142,14 +142,14 @@ async def get_ava_state(trait_name: str, db: Session = Depends(get_db)):
     return state
 
 
-@router.post("/state", response_model=AvaStateRead)
-async def create_ava_state(
-    state_data: AvaStateCreate, 
+@router.post("/state", response_model=ClaraStateRead)
+async def create_clara_state(
+    state_data: ClaraStateCreate,
     db: Session = Depends(get_db)
 ):
-    """Create a new state trait for Ava."""
+    """Create a new state trait for Clara."""
     try:
-        new_state = AvaState(**state_data.model_dump())
+        new_state = ClaraState(**state_data.model_dump())
         db.add(new_state)
         db.commit()
         db.refresh(new_state)
@@ -162,14 +162,14 @@ async def create_ava_state(
         )
 
 
-@router.put("/state/{trait_name}", response_model=AvaStateRead)
-async def update_ava_state(
+@router.put("/state/{trait_name}", response_model=ClaraStateRead)
+async def update_clara_state(
     trait_name: str,
-    state_data: AvaStateUpdate,
+    state_data: ClaraStateUpdate,
     db: Session = Depends(get_db)
 ):
     """Update an existing state trait."""
-    state = db.query(AvaState).filter(AvaState.trait_name == trait_name).first()
+    state = db.query(ClaraState).filter(ClaraState.trait_name == trait_name).first()
     if not state:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

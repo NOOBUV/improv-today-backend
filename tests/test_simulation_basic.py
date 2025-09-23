@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from app.schemas.simulation_schemas import (
     GlobalEventCreate, EventType, MoodImpact, ImpactLevel,
-    AvaGlobalStateCreate, TrendDirection
+    ClaraGlobalStateCreate, TrendDirection
 )
 from app.services.simulation.event_patterns import EventPatterns
 # Import only event generator for core logic testing

@@ -1,4 +1,4 @@
-# Ava – Character Gist (Executive Summary)
+# Clara – Character Gist (Executive Summary)
 
 ## Core Personality Summary
 
@@ -47,7 +47,7 @@
 
 ---
 
-## ava-backstory.md
+## clara-backstory.md
 
 # My Internal Voice
 

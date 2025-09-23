@@ -8,13 +8,13 @@ from datetime import datetime
 
 from app.main import app as fastapi_app
 from app.core.database import Base, get_db
-from app.models.ava_state import AvaState
+from app.models.clara_state import ClaraState
 # Import all models to ensure they're registered with Base
 import app.models
 
 
-class TestAvaAPI:
-    """Integration tests for Ava API endpoints"""
+class TestClaraAPI:
+    """Integration tests for Clara API endpoints"""
     
     @pytest.fixture
     def db_session(self):
@@ -46,13 +46,13 @@ class TestAvaAPI:
         fastapi_app.dependency_overrides.clear()
     
     def test_conversation_endpoint_success(self, client):
-        """Test successful conversation with Ava"""
+        """Test successful conversation with clara"""
         request_data = {
             "message": "Hello Ava, how are you today?",
             "user_id": "test-user-123"
         }
         
-        response = client.post("/api/ava/conversation", json=request_data)
+        response = client.post("/api/clara/conversation", json=request_data)
         
         assert response.status_code == 200
         data = response.json()
@@ -84,7 +84,7 @@ class TestAvaAPI:
         """Test conversation endpoint with minimal request data"""
         request_data = {"message": "Hi!"}
         
-        response = client.post("/api/ava/conversation", json=request_data)
+        response = client.post("/api/clara/conversation", json=request_data)
         
         assert response.status_code == 200
         data = response.json()
@@ -93,16 +93,16 @@ class TestAvaAPI:
     def test_conversation_endpoint_invalid_request(self, client):
         """Test conversation endpoint with invalid request data"""
         # Empty message
-        response = client.post("/api/ava/conversation", json={"message": ""})
+        response = client.post("/api/clara/conversation", json={"message": ""})
         assert response.status_code == 422
         
         # Missing message
-        response = client.post("/api/ava/conversation", json={"user_id": "test"})
+        response = client.post("/api/clara/conversation", json={"user_id": "test"})
         assert response.status_code == 422
         
         # Message too long
         long_message = "a" * 2001
-        response = client.post("/api/ava/conversation", json={"message": long_message})
+        response = client.post("/api/clara/conversation", json={"message": long_message})
         assert response.status_code == 422
     
     def test_conversation_response_variety(self, client):
@@ -111,7 +111,7 @@ class TestAvaAPI:
         responses = []
         
         for message in messages:
-            response = client.post("/api/ava/conversation", json={"message": message})
+            response = client.post("/api/clara/conversation", json={"message": message})
             assert response.status_code == 200
             responses.append(response.json()["message"])
         
@@ -121,7 +121,7 @@ class TestAvaAPI:
     
     def test_get_ava_states_empty(self, client):
         """Test getting Ava states when none exist"""
-        response = client.get("/api/ava/state")
+        response = client.get("/api/clara/state")
         assert response.status_code == 200
         assert response.json() == []
     
@@ -129,7 +129,7 @@ class TestAvaAPI:
         """Test creating a new Ava state"""
         state_data = {"trait_name": "mood", "value": "cheerful"}
         
-        response = client.post("/api/ava/state", json=state_data)
+        response = client.post("/api/clara/state", json=state_data)
         assert response.status_code == 200
         
         data = response.json()
@@ -143,11 +143,11 @@ class TestAvaAPI:
         state_data = {"trait_name": "energy", "value": "7"}
         
         # First creation should succeed
-        response = client.post("/api/ava/state", json=state_data)
+        response = client.post("/api/clara/state", json=state_data)
         assert response.status_code == 200
         
         # Duplicate should fail
-        response = client.post("/api/ava/state", json=state_data)
+        response = client.post("/api/clara/state", json=state_data)
         assert response.status_code == 400
         assert "already exists" in response.json()["detail"]
     
@@ -155,16 +155,16 @@ class TestAvaAPI:
         """Test getting Ava states when data exists"""
         # Add some test data
         states = [
-            AvaState(trait_name="mood", value="happy"),
-            AvaState(trait_name="energy", value="8"),
-            AvaState(trait_name="stress", value="3")
+            ClaraState(trait_name="mood", value="happy"),
+            ClaraState(trait_name="energy", value="8"),
+            ClaraState(trait_name="stress", value="3")
         ]
         
         for state in states:
             db_session.add(state)
         db_session.commit()
         
-        response = client.get("/api/ava/state")
+        response = client.get("/api/clara/state")
         assert response.status_code == 200
         
         data = response.json()
@@ -176,11 +176,11 @@ class TestAvaAPI:
     def test_get_specific_ava_state(self, client, db_session):
         """Test getting a specific Ava state by trait name"""
         # Add test data
-        state = AvaState(trait_name="confidence", value="9")
+        state = ClaraState(trait_name="confidence", value="9")
         db_session.add(state)
         db_session.commit()
         
-        response = client.get("/api/ava/state/confidence")
+        response = client.get("/api/clara/state/confidence")
         assert response.status_code == 200
         
         data = response.json()
@@ -189,20 +189,20 @@ class TestAvaAPI:
     
     def test_get_nonexistent_ava_state(self, client):
         """Test getting a non-existent Ava state"""
-        response = client.get("/api/ava/state/nonexistent")
+        response = client.get("/api/clara/state/nonexistent")
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]
     
     def test_update_ava_state(self, client, db_session):
         """Test updating an existing Ava state"""
         # Add test data
-        state = AvaState(trait_name="focus", value="5")
+        state = ClaraState(trait_name="focus", value="5")
         db_session.add(state)
         db_session.commit()
         
         # Update the state
         update_data = {"value": "8"}
-        response = client.put("/api/ava/state/focus", json=update_data)
+        response = client.put("/api/clara/state/focus", json=update_data)
         assert response.status_code == 200
         
         data = response.json()
@@ -212,6 +212,6 @@ class TestAvaAPI:
     def test_update_nonexistent_ava_state(self, client):
         """Test updating a non-existent Ava state"""
         update_data = {"value": "10"}
-        response = client.put("/api/ava/state/nonexistent", json=update_data)
+        response = client.put("/api/clara/state/nonexistent", json=update_data)
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]

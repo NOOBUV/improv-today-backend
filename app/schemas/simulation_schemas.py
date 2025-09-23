@@ -90,8 +90,8 @@ class GlobalEvent(GlobalEventBase):
     consciousness_raw_response: Optional[str] = None
 
 
-class AvaGlobalStateBase(BaseModel):
-    """Base schema for AvaGlobalState."""
+class ClaraGlobalStateBase(BaseModel):
+    """Base schema for ClaraGlobalState."""
     trait_name: str = Field(..., min_length=1, max_length=50, description="Trait identifier")
     value: str = Field(..., min_length=1, max_length=100, description="Trait value")
     numeric_value: Optional[int] = Field(None, ge=0, le=100, description="Numeric value (0-100)")
@@ -101,12 +101,12 @@ class AvaGlobalStateBase(BaseModel):
     max_value: Optional[int] = Field(100, le=100, description="Maximum allowed value")
 
 
-class AvaGlobalStateCreate(AvaGlobalStateBase):
+class ClaraGlobalStateCreate(ClaraGlobalStateBase):
     """Schema for creating a new global state trait."""
     pass
 
 
-class AvaGlobalStateUpdate(BaseModel):
+class ClaraGlobalStateUpdate(BaseModel):
     """Schema for updating an existing global state trait."""
     value: Optional[str] = Field(None, min_length=1, max_length=100)
     numeric_value: Optional[int] = Field(None, ge=0, le=100)
@@ -115,8 +115,8 @@ class AvaGlobalStateUpdate(BaseModel):
     last_event_id: Optional[str] = None
 
 
-class AvaGlobalState(AvaGlobalStateBase):
-    """Complete schema for AvaGlobalState with all fields."""
+class ClaraGlobalState(ClaraGlobalStateBase):
+    """Complete schema for ClaraGlobalState with all fields."""
     model_config = ConfigDict(from_attributes=True)
 
     state_id: int

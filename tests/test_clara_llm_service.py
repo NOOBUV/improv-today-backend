@@ -1,5 +1,5 @@
 """
-Tests for AvaLLMService
+Tests for ClaraLLMService
 """
 import pytest
 import json
@@ -7,14 +7,14 @@ import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from dataclasses import dataclass
 
-from app.services.ava_llm_service import AvaLLMService, AvaResponse
+from app.services.clara_llm_service import ClaraLLMService, ClaraResponse
 from app.services.conversation_prompt_service import EmotionType
 
 
 @pytest.fixture
 def llm_service():
-    """Create AvaLLMService instance for testing"""
-    return AvaLLMService()
+    """Create ClaraLLMService instance for testing"""
+    return ClaraLLMService()
 
 
 @pytest.fixture
@@ -35,14 +35,14 @@ def mock_openai_response():
     return response
 
 
-class TestAvaLLMService:
-    """Test suite for AvaLLMService"""
+class TestClaraLLMService:
+    """Test suite for ClaraLLMService"""
     
     def test_init_without_api_key(self):
         """Test initialization without OpenAI API key"""
         with patch('app.services.ava_llm_service.settings') as mock_settings:
             mock_settings.openai_api_key = ""
-            service = AvaLLMService()
+            service = ClaraLLMService()
             assert service.client is None
     
     def test_init_with_api_key(self):
@@ -50,7 +50,7 @@ class TestAvaLLMService:
         with patch('app.services.ava_llm_service.settings') as mock_settings:
             mock_settings.openai_api_key = "test-key"
             with patch('app.services.ava_llm_service.OpenAI') as mock_openai:
-                service = AvaLLMService()
+                service = ClaraLLMService()
                 mock_openai.assert_called_once_with(api_key="test-key")
     
     def test_init_with_api_error(self):
@@ -58,56 +58,56 @@ class TestAvaLLMService:
         with patch('app.services.ava_llm_service.settings') as mock_settings:
             mock_settings.openai_api_key = "test-key"
             with patch('app.services.ava_llm_service.OpenAI', side_effect=Exception("API Error")):
-                service = AvaLLMService()
+                service = ClaraLLMService()
                 assert service.client is None
     
     @pytest.mark.asyncio
-    async def test_generate_ava_response_no_client(self, llm_service):
+    async def test_generate_clara_response_no_client(self, llm_service):
         """Test response generation without OpenAI client"""
         llm_service.client = None
         
-        result = await llm_service.generate_ava_response("test prompt")
+        result = await llm_service.generate_clara_response("test prompt")
         
-        assert isinstance(result, AvaResponse)
+        assert isinstance(result, ClaraResponse)
         assert not result.success
         assert result.emotion == EmotionType.CALM
         assert len(result.message) > 0
         assert "FALLBACK" in result.raw_response
     
     @pytest.mark.asyncio
-    async def test_generate_ava_response_success(self, llm_service, mock_openai_response):
+    async def test_generate_clara_response_success(self, llm_service, mock_openai_response):
         """Test successful response generation"""
         llm_service.client = Mock()
         
         with patch.object(llm_service, '_make_openai_call', return_value=mock_openai_response):
-            result = await llm_service.generate_ava_response("test prompt")
+            result = await llm_service.generate_clara_response("test prompt")
             
-            assert isinstance(result, AvaResponse)
+            assert isinstance(result, ClaraResponse)
             assert result.success
             assert result.message == "Test response"
             assert result.emotion == EmotionType.CALM
     
     @pytest.mark.asyncio
-    async def test_generate_ava_response_timeout(self, llm_service):
+    async def test_generate_clara_response_timeout(self, llm_service):
         """Test response generation with timeout"""
         llm_service.client = Mock()
         
         with patch.object(llm_service, '_make_openai_call', side_effect=asyncio.TimeoutError):
-            result = await llm_service.generate_ava_response("test prompt", timeout=1)
+            result = await llm_service.generate_clara_response("test prompt", timeout=1)
             
-            assert isinstance(result, AvaResponse)
+            assert isinstance(result, ClaraResponse)
             assert not result.success
             assert "timeout" in result.raw_response.lower()
     
     @pytest.mark.asyncio
-    async def test_generate_ava_response_api_error(self, llm_service):
+    async def test_generate_clara_response_api_error(self, llm_service):
         """Test response generation with API error"""
         llm_service.client = Mock()
         
         with patch.object(llm_service, '_make_openai_call', side_effect=Exception("API Error")):
-            result = await llm_service.generate_ava_response("test prompt")
+            result = await llm_service.generate_clara_response("test prompt")
             
-            assert isinstance(result, AvaResponse)
+            assert isinstance(result, ClaraResponse)
             assert not result.success
             assert "API Error" in result.raw_response
     
@@ -142,7 +142,7 @@ class TestAvaLLMService:
         """Test parsing valid JSON response"""
         result = llm_service._parse_ava_response(mock_openai_response)
         
-        assert isinstance(result, AvaResponse)
+        assert isinstance(result, ClaraResponse)
         assert result.success
         assert result.message == "Test response"
         assert result.emotion == EmotionType.CALM
@@ -185,7 +185,7 @@ class TestAvaLLMService:
         """Test fallback response generation"""
         result = llm_service._get_fallback_response()
         
-        assert isinstance(result, AvaResponse)
+        assert isinstance(result, ClaraResponse)
         assert not result.success
         assert result.emotion == EmotionType.CALM
         assert len(result.message) > 0

@@ -12,10 +12,10 @@ import asyncio
 import json
 
 from app.core.database import SessionLocal, get_async_session
-from app.schemas.simulation_schemas import AvaGlobalStateUpdate, TrendDirection
+from app.schemas.simulation_schemas import ClaraGlobalStateUpdate, TrendDirection
 from app.services.simulation.repository import SimulationRepository
 from app.models.simulation import GlobalEvents
-from app.models.ava_state import AvaState
+from app.models.clara_state import ClaraState
 import time
 
 logger = logging.getLogger(__name__)
@@ -446,7 +446,7 @@ class StateManagerService:
         """Update a specific trait state in the database."""
         try:
             # Get current state
-            current_state = await repo.get_ava_global_state(trait_name)
+            current_state = await repo.get_clara_global_state(trait_name)
 
             if current_state:
                 current_value = current_state.numeric_value or self.core_traits[trait_name]["default"]
@@ -473,7 +473,7 @@ class StateManagerService:
             change_info["previous_value"] = current_value
 
             # Update state
-            update_data = AvaGlobalStateUpdate(
+            update_data = ClaraGlobalStateUpdate(
                 value=str(new_value),
                 numeric_value=new_value,
                 change_reason=change_info["reason"],
@@ -508,7 +508,7 @@ class StateManagerService:
             async for db_session in get_async_session():
                 try:
                     repo = SimulationRepository(db_session)
-                    all_states = await repo.get_all_ava_global_states()
+                    all_states = await repo.get_all_clara_global_states()
 
                     state_summary = {}
                     for state in all_states:
@@ -565,11 +565,11 @@ class StateManagerService:
                     initialized_traits = []
 
                     for trait_name, config in self.core_traits.items():
-                        existing_state = await repo.get_ava_global_state(trait_name)
+                        existing_state = await repo.get_clara_global_state(trait_name)
 
                         if not existing_state:
-                            from app.schemas.simulation_schemas import AvaGlobalStateCreate
-                            create_data = AvaGlobalStateCreate(
+                            from app.schemas.simulation_schemas import ClaraGlobalStateCreate
+                            create_data = ClaraGlobalStateCreate(
                                 trait_name=trait_name,
                                 value=str(config["default"]),
                                 numeric_value=config["default"],

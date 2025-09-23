@@ -1,5 +1,5 @@
 """
-Integration tests for Ava API endpoint
+Integration tests for Clara API endpoint
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -8,20 +8,20 @@ from datetime import datetime
 
 from app.main import app
 from app.services.conversation_prompt_service import EmotionType
-from app.services.ava_llm_service import AvaResponse
+from app.services.clara_llm_service import ClaraResponse
 
 
 client = TestClient(app)
 
 
-class TestAvaConversationEndpoint:
-    """Integration tests for /api/ava/conversation endpoint"""
+class TestClaraConversationEndpoint:
+    """Integration tests for /api/clara/conversation endpoint"""
     
     def test_conversation_endpoint_exists(self):
         """Test that the conversation endpoint is accessible"""
         # Test with minimal valid request
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Hello"}
         )
         
@@ -34,7 +34,7 @@ class TestAvaConversationEndpoint:
         """Test successful conversation endpoint call"""
         # Setup mocks
         mock_backstory.return_value = "Test character backstory"
-        mock_llm_response.return_value = AvaResponse(
+        mock_llm_response.return_value = ClaraResponse(
             message="Hello! How are you doing today?",
             emotion=EmotionType.HAPPY,
             raw_response='{"message": "Hello! How are you doing today?", "emotion": "happy"}',
@@ -43,7 +43,7 @@ class TestAvaConversationEndpoint:
         
         # Make request
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Hi there!"}
         )
         
@@ -70,7 +70,7 @@ class TestAvaConversationEndpoint:
     def test_conversation_endpoint_with_conversation_id(self, mock_llm_response, mock_backstory):
         """Test conversation endpoint with provided conversation ID"""
         mock_backstory.return_value = "Test backstory"
-        mock_llm_response.return_value = AvaResponse(
+        mock_llm_response.return_value = ClaraResponse(
             message="Test response",
             emotion=EmotionType.CALM,
             raw_response='{"message": "Test response", "emotion": "calm"}',
@@ -80,7 +80,7 @@ class TestAvaConversationEndpoint:
         conversation_id = "test-conversation-123"
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={
                 "message": "Test message",
                 "conversation_id": conversation_id
@@ -106,7 +106,7 @@ class TestAvaConversationEndpoint:
         ]
         
         for message, expected_emotion in test_cases:
-            mock_llm_response.return_value = AvaResponse(
+            mock_llm_response.return_value = ClaraResponse(
                 message="Test response",
                 emotion=expected_emotion,
                 raw_response=f'{{"message": "Test response", "emotion": "{expected_emotion.value}"}}',
@@ -114,7 +114,7 @@ class TestAvaConversationEndpoint:
             )
             
             response = client.post(
-                "/api/ava/conversation",
+                "/api/clara/conversation",
                 json={"message": message}
             )
             
@@ -127,7 +127,7 @@ class TestAvaConversationEndpoint:
     def test_conversation_endpoint_fallback_handling(self, mock_llm_response, mock_backstory):
         """Test handling of LLM service fallback responses"""
         mock_backstory.return_value = "Test backstory"
-        mock_llm_response.return_value = AvaResponse(
+        mock_llm_response.return_value = ClaraResponse(
             message="I'm having trouble finding the right words right now.",
             emotion=EmotionType.CALM,
             raw_response="FALLBACK - API unavailable",
@@ -135,7 +135,7 @@ class TestAvaConversationEndpoint:
         )
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Hello"}
         )
         
@@ -150,7 +150,7 @@ class TestAvaConversationEndpoint:
         mock_backstory.return_value = ""  # Empty content
         
         with patch('app.services.ava_llm_service.AvaLLMService.generate_ava_response') as mock_llm:
-            mock_llm.return_value = AvaResponse(
+            mock_llm.return_value = ClaraResponse(
                 message="Test response",
                 emotion=EmotionType.CALM,
                 raw_response='{"message": "Test response", "emotion": "calm"}',
@@ -158,7 +158,7 @@ class TestAvaConversationEndpoint:
             )
             
             response = client.post(
-                "/api/ava/conversation",
+                "/api/clara/conversation",
                 json={"message": "Hello"}
             )
             
@@ -170,7 +170,7 @@ class TestAvaConversationEndpoint:
         """Test conversation endpoint with invalid request data"""
         # Missing message
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={}
         )
         
@@ -179,7 +179,7 @@ class TestAvaConversationEndpoint:
     def test_conversation_endpoint_empty_message(self):
         """Test conversation endpoint with empty message"""
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": ""}
         )
         
@@ -190,7 +190,7 @@ class TestAvaConversationEndpoint:
         long_message = "x" * 2001  # Exceeds max_length=2000
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": long_message}
         )
         
@@ -203,7 +203,7 @@ class TestAvaConversationEndpoint:
         mock_backstory.side_effect = Exception("Content service error")
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Hello"}
         )
         
@@ -215,7 +215,7 @@ class TestAvaConversationEndpoint:
     def test_conversation_endpoint_response_structure(self, mock_llm_response, mock_backstory):
         """Test that response has correct structure and types"""
         mock_backstory.return_value = "Test backstory"
-        mock_llm_response.return_value = AvaResponse(
+        mock_llm_response.return_value = ClaraResponse(
             message="Test response message",
             emotion=EmotionType.SASSY,
             raw_response='{"message": "Test response message", "emotion": "sassy"}',
@@ -223,7 +223,7 @@ class TestAvaConversationEndpoint:
         )
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Test message"}
         )
         
@@ -257,7 +257,7 @@ class TestAvaConversationEndpoint:
         """Test that services are called with correct parameters"""
         mock_backstory.return_value = "Character backstory content"
         mock_prompt.return_value = "Constructed prompt"
-        mock_llm.return_value = AvaResponse(
+        mock_llm.return_value = ClaraResponse(
             message="LLM response",
             emotion=EmotionType.CALM,
             raw_response='{"message": "LLM response", "emotion": "calm"}',
@@ -265,7 +265,7 @@ class TestAvaConversationEndpoint:
         )
         
         response = client.post(
-            "/api/ava/conversation",
+            "/api/clara/conversation",
             json={"message": "Hello Ava"}
         )
         

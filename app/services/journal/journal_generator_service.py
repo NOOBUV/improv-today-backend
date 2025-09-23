@@ -12,7 +12,7 @@ import openai
 from openai import OpenAI
 
 from app.core.config import settings
-from app.models.simulation import GlobalEvents, AvaGlobalState
+from app.models.simulation import GlobalEvents, ClaraGlobalState
 from app.models.journal import JournalEntries
 
 logger = logging.getLogger(__name__)
@@ -120,11 +120,11 @@ class JournalGeneratorService:
         return context
 
     async def _get_emotional_state(self, session: AsyncSession) -> Dict[str, Any]:
-        """Get current emotional state from AvaGlobalState"""
+        """Get current emotional state from ClaraGlobalState"""
         state_result = await session.execute(
-            select(AvaGlobalState)
+            select(ClaraGlobalState)
             .where(
-                AvaGlobalState.trait_name.in_(["mood", "stress", "energy"])
+                ClaraGlobalState.trait_name.in_(["mood", "stress", "energy"])
             )
         )
         states = state_result.scalars().all()

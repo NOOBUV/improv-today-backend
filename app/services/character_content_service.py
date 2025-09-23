@@ -1,5 +1,5 @@
 """
-Character Content Service for loading Ava's backstory and character data.
+Character Content Service for loading Clara's backstory and character data.
 """
 import os
 from typing import Dict, Optional
@@ -14,13 +14,13 @@ class CharacterContentService:
     
     def __init__(self):
         # Base path to content directory
-        self.content_base_path = Path(__file__).parent.parent.parent / "content" / "ava"
+        self.content_base_path = Path(__file__).parent.parent.parent / "content" / "clara"
         logger.info(f"Character content base path: {self.content_base_path}")
     
     def load_character_gist(self) -> str:
-        """Load Ava's character gist from ava-character-gist.md"""
+        """Load Clara's character gist from clara-character-gist.md"""
         try:
-            gist_path = self.content_base_path / "ava-character-gist.md"
+            gist_path = self.content_base_path / "clara-character-gist.md"
             if not gist_path.exists():
                 logger.error(f"Character gist file not found: {gist_path}")
                 return ""

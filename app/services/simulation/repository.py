@@ -10,9 +10,9 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta, timezone
 import logging
 
-from app.models.simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
+from app.models.simulation import GlobalEvents, ClaraGlobalState, SimulationLog, SimulationConfig
 from app.schemas.simulation_schemas import (
-    GlobalEventCreate, GlobalEventUpdate, AvaGlobalStateCreate, AvaGlobalStateUpdate,
+    GlobalEventCreate, GlobalEventUpdate, ClaraGlobalStateCreate, ClaraGlobalStateUpdate,
     SimulationLogCreate, SimulationConfigCreate, SimulationConfigUpdate,
     EventType, EventStatus
 )
@@ -110,60 +110,60 @@ class SimulationRepository:
             raise
 
     # Ava Global State operations
-    async def get_ava_global_state(self, trait_name: str) -> Optional[AvaGlobalState]:
+    async def get_clara_global_state(self, trait_name: str) -> Optional[ClaraGlobalState]:
         """Get Ava's global state for a specific trait."""
         try:
             result = await self.db.execute(
-                select(AvaGlobalState).where(AvaGlobalState.trait_name == trait_name)
+                select(ClaraGlobalState).where(ClaraGlobalState.trait_name == trait_name)
             )
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting Ava global state for {trait_name}: {e}")
             raise
 
-    async def get_all_ava_global_states(self) -> List[AvaGlobalState]:
-        """Get all Ava global state traits."""
+    async def get_all_clara_global_states(self) -> List[ClaraGlobalState]:
+        """Get all Clara global state traits."""
         try:
             result = await self.db.execute(
-                select(AvaGlobalState).order_by(AvaGlobalState.trait_name)
+                select(ClaraGlobalState).order_by(ClaraGlobalState.trait_name)
             )
             return list(result.scalars().all())
         except Exception as e:
-            logger.error(f"Error getting all Ava global states: {e}")
+            logger.error(f"Error getting all Clara global states: {e}")
             raise
 
-    async def create_or_update_ava_state(
+    async def create_or_update_clara_state(
         self,
         trait_name: str,
-        state_data: AvaGlobalStateCreate | AvaGlobalStateUpdate
-    ) -> AvaGlobalState:
+        state_data: ClaraGlobalStateCreate | ClaraGlobalStateUpdate
+    ) -> ClaraGlobalState:
         """Create or update Ava's global state for a trait."""
         try:
-            existing_state = await self.get_ava_global_state(trait_name)
+            existing_state = await self.get_clara_global_state(trait_name)
 
             if existing_state:
                 # Update existing state
                 update_data = state_data.model_dump(exclude_unset=True)
                 if update_data:
                     await self.db.execute(
-                        update(AvaGlobalState)
-                        .where(AvaGlobalState.trait_name == trait_name)
+                        update(ClaraGlobalState)
+                        .where(ClaraGlobalState.trait_name == trait_name)
                         .values(**update_data)
                     )
                     await self.db.commit()
-                return await self.get_ava_global_state(trait_name)
+                return await self.get_clara_global_state(trait_name)
             else:
                 # Create new state
-                if isinstance(state_data, AvaGlobalStateUpdate):
+                if isinstance(state_data, ClaraGlobalStateUpdate):
                     # Convert update to create data
-                    create_data = AvaGlobalStateCreate(
+                    create_data = ClaraGlobalStateCreate(
                         trait_name=trait_name,
                         **state_data.model_dump(exclude_unset=True)
                     )
                 else:
                     create_data = state_data
 
-                db_state = AvaGlobalState(**create_data.model_dump())
+                db_state = ClaraGlobalState(**create_data.model_dump())
                 self.db.add(db_state)
                 await self.db.commit()
                 await self.db.refresh(db_state)
@@ -344,12 +344,12 @@ class SimulationRepository:
             start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
             result = await self.db.execute(
-                select(AvaGlobalState)
+                select(ClaraGlobalState)
                 .where(and_(
-                    AvaGlobalState.trait_name == trait_name,
-                    AvaGlobalState.last_updated >= start_time
+                    ClaraGlobalState.trait_name == trait_name,
+                    ClaraGlobalState.last_updated >= start_time
                 ))
-                .order_by(AvaGlobalState.last_updated.asc())
+                .order_by(ClaraGlobalState.last_updated.asc())
             )
 
             states = result.scalars().all()
@@ -384,9 +384,9 @@ class SimulationRepository:
             start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
             result = await self.db.execute(
-                select(AvaGlobalState)
-                .where(AvaGlobalState.last_updated >= start_time)
-                .order_by(AvaGlobalState.last_updated.asc())
+                select(ClaraGlobalState)
+                .where(ClaraGlobalState.last_updated >= start_time)
+                .order_by(ClaraGlobalState.last_updated.asc())
             )
 
             states = result.scalars().all()

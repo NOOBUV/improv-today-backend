@@ -3,10 +3,10 @@ from .user import User
 from .session import Session, SessionTranscript
 from .vocabulary import VocabularyAssessment, VocabularyRecommendation, VocabularyUsage, VocabularySuggestion
 from .conversation_v2 import Conversation, ConversationMessage, SessionState, UserPreferences
-from .ava_state import AvaState
+from .clara_state import ClaraState
 from .session_state import UserSessionState, StateChangeHistory, SessionStateBackup
 from .subscription import SubscriptionPlan, UserSubscription, PaymentRecord
-from .simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
+from .simulation import GlobalEvents, ClaraGlobalState, SimulationLog, SimulationConfig
 from .journal import JournalEntries, JournalGenerationLog, JournalTemplate
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
     "ConversationMessage",
     "SessionState",
     "UserPreferences",
-    "AvaState",
+    "ClaraState",
     "UserSessionState",
     "StateChangeHistory",
     "SessionStateBackup",
@@ -29,7 +29,7 @@ __all__ = [
     "UserSubscription",
     "PaymentRecord",
     "GlobalEvents",
-    "AvaGlobalState",
+    "ClaraGlobalState",
     "SimulationLog",
     "SimulationConfig",
     "JournalEntries",

@@ -5,15 +5,15 @@ from typing import Optional
 from app.core.database import Base
 
 
-class AvaState(Base):
+class ClaraState(Base):
     """
-    Enhanced AvaState model for storing Ava's persistent core traits and attributes.
+    Enhanced ClaraState model for storing Clara's persistent core traits and attributes.
 
     This table implements the Global State pattern from the dual-state architecture,
     storing persistent attributes that survive across conversation sessions.
     Enhanced with numeric values, trend tracking, and change metadata.
     """
-    __tablename__ = "ava_state"
+    __tablename__ = "clara_state"
 
     state_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     trait_name: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
@@ -41,4 +41,4 @@ class AvaState(Base):
     )
 
     def __repr__(self):
-        return f"<AvaState(trait_name='{self.trait_name}', value='{self.value}', numeric_value={self.numeric_value})>"
+        return f"<ClaraState(trait_name='{self.trait_name}', value='{self.value}', numeric_value={self.numeric_value})>"

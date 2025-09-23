@@ -1,5 +1,5 @@
 """
-Ava LLM Service for handling OpenAI API calls for Ava conversations.
+Clara LLM Service for handling OpenAI API calls for Clara conversations.
 """
 import json
 import logging
@@ -14,16 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AvaResponse:
-    """Response from Ava LLM service"""
+class ClaraResponse:
+    """Response from Clara LLM service"""
     message: str
     emotion: EmotionType
     raw_response: str
     success: bool
 
 
-class AvaLLMService:
-    """Service for making LLM calls for Ava conversations with structured emotion responses."""
+class ClaraLLMService:
+    """Service for making LLM calls for Clara conversations with structured emotion responses."""
     
     def __init__(self):
         self.client = None
@@ -35,20 +35,20 @@ class AvaLLMService:
         else:
             try:
                 self.client = OpenAI(api_key=settings.openai_api_key)
-                logger.info("OpenAI client initialized successfully for Ava LLM service")
+                logger.info("OpenAI client initialized successfully for Clara LLM service")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self.client = None
     
-    async def generate_ava_response(
+    async def generate_clara_response(
         self,
         prompt: str,
         max_tokens: int = 150,
         temperature: float = 0.8,
         timeout: int = 30
-    ) -> AvaResponse:
+    ) -> ClaraResponse:
         """
-        Generate response from Ava using OpenAI API with structured emotion output.
+        Generate response from Clara using OpenAI API with structured emotion output.
         
         Args:
             prompt: Complete conversation prompt
@@ -57,7 +57,7 @@ class AvaLLMService:
             timeout: Timeout for API call in seconds
             
         Returns:
-            AvaResponse with structured message and emotion
+            ClaraResponse with structured message and emotion
         """
         
         if not self.client:
@@ -70,14 +70,14 @@ class AvaLLMService:
                 timeout=timeout
             )
             
-            return self._parse_ava_response(response)
+            return self._parse_clara_response(response)
             
         except asyncio.TimeoutError:
             logger.error(f"OpenAI API call timed out after {timeout} seconds")
             return self._get_fallback_response(error="API timeout")
             
         except Exception as e:
-            logger.error(f"Error generating Ava response: {str(e)}")
+            logger.error(f"Error generating Clara response: {str(e)}")
             return self._get_fallback_response(error=str(e))
     
     async def _make_openai_call(self, prompt: str, max_tokens: int, temperature: float) -> Dict:
@@ -92,7 +92,7 @@ class AvaLLMService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are Ava, a 22-year-old human having a natural conversation. Never respond like an AI assistant (avoid phrases like 'Sure, I can help with that'). You are NOT providing help or assistance - you are simply chatting as yourself. Respond authentically as Ava would in a casual conversation between friends, and always return valid JSON in the exact format requested."
+                        "content": "You are Clara, a 22-year-old human having a natural conversation. Never respond like an AI assistant (avoid phrases like 'Sure, I can help with that'). You are NOT providing help or assistance - you are simply chatting as yourself. Respond authentically as Clara would in a casual conversation between friends, and always return valid JSON in the exact format requested."
                     },
                     {
                         "role": "user",
@@ -107,8 +107,8 @@ class AvaLLMService:
         response = await loop.run_in_executor(None, _call_openai)
         return response
     
-    def _parse_ava_response(self, response) -> AvaResponse:
-        """Parse OpenAI response into AvaResponse structure."""
+    def _parse_clara_response(self, response) -> ClaraResponse:
+        """Parse OpenAI response into ClaraResponse structure."""
         
         try:
             raw_content = response.choices[0].message.content
@@ -131,7 +131,7 @@ class AvaLLMService:
                 logger.warning("Empty message in response, using fallback")
                 return self._get_fallback_response()
             
-            return AvaResponse(
+            return ClaraResponse(
                 message=message.strip(),
                 emotion=emotion,
                 raw_response=raw_content,
@@ -142,7 +142,7 @@ class AvaLLMService:
             logger.error(f"Failed to parse JSON response: {e}")
             # Try to extract message from raw content
             raw_content = response.choices[0].message.content
-            return AvaResponse(
+            return ClaraResponse(
                 message=raw_content.strip() if raw_content else "I'm having trouble finding the right words right now.",
                 emotion=EmotionType.CALM,
                 raw_response=raw_content,
@@ -150,10 +150,10 @@ class AvaLLMService:
             )
             
         except Exception as e:
-            logger.error(f"Error parsing Ava response: {e}")
+            logger.error(f"Error parsing Clara response: {e}")
             return self._get_fallback_response()
     
-    def _get_fallback_response(self, error: Optional[str] = None) -> AvaResponse:
+    def _get_fallback_response(self, error: Optional[str] = None) -> ClaraResponse:
         """Get fallback response when API is unavailable or fails."""
         
         fallback_responses = [
@@ -184,7 +184,7 @@ class AvaLLMService:
         error_msg = f" (Fallback due to: {error})" if error else " (Fallback - API unavailable)"
         logger.info(f"Using fallback response{error_msg}")
         
-        return AvaResponse(
+        return ClaraResponse(
             message=selected["message"],
             emotion=selected["emotion"],
             raw_response=f"FALLBACK{error_msg}",

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.journal.journal_generator_service import JournalGeneratorService
 from app.services.journal.daily_aggregator import DailyAggregatorService
-from app.models.simulation import GlobalEvents, AvaGlobalState
+from app.models.simulation import GlobalEvents, ClaraGlobalState
 from app.models.journal import JournalEntries
 
 

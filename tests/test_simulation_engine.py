@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.simulation import GlobalEvents, AvaGlobalState, SimulationLog, SimulationConfig
+from app.models.simulation import GlobalEvents, ClaraGlobalState, SimulationLog, SimulationConfig
 from app.schemas.simulation_schemas import (
     GlobalEventCreate, EventType, MoodImpact, ImpactLevel,
-    AvaGlobalStateCreate, AvaGlobalStateUpdate, TrendDirection
+    ClaraGlobalStateCreate, ClaraGlobalStateUpdate, TrendDirection
 )
 from app.services.simulation.repository import SimulationRepository
 from app.services.simulation.event_generator import EventGeneratorService
