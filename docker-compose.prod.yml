@@ -17,7 +17,7 @@ services:
 
   worker:
     build: .
-    command: celery -A celery_app worker --loglevel=info
+    command: celery -A celery_app worker --loglevel=info --queues=celery,simulation,journal
     env_file: /opt/improv-today/improv-today-backend.env
     environment:
       - REDIS_URL=redis://redis:6379/0
