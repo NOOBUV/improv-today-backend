@@ -43,8 +43,7 @@ def generate_daily_journal_entry(self, target_date_str: Optional[str] = None) ->
     import asyncio
     return asyncio.run(self._generate_daily_journal_entry_async(target_date_str))
 
-
-async def _generate_daily_journal_entry_async(task_instance, target_date_str: Optional[str] = None) -> Dict[str, Any]:
+    async def _generate_daily_journal_entry_async(self, target_date_str: Optional[str] = None) -> Dict[str, Any]:
     """Async implementation of daily journal generation"""
     start_time = datetime.now(timezone.utc)
     target_date = date.fromisoformat(target_date_str) if target_date_str else date.today()
@@ -66,7 +65,7 @@ async def _generate_daily_journal_entry_async(task_instance, target_date_str: Op
             logger.info(f"Journal entry already exists for {target_date}, skipping generation")
             await _log_generation_attempt(
                 session, target_date, "skipped", 0, 0,
-                task_instance.request.id, "scheduled",
+                self.request.id, "scheduled",
                 error_message="Entry already exists"
             )
             return {
@@ -83,7 +82,7 @@ async def _generate_daily_journal_entry_async(task_instance, target_date_str: Op
             logger.warning(f"No journal content generated for {target_date}")
             await _log_generation_attempt(
                 session, target_date, "no_events", 0, 0,
-                task_instance.request.id, "scheduled",
+                self.request.id, "scheduled",
                 error_message="No events found for journal generation"
             )
             return {
@@ -114,7 +113,7 @@ async def _generate_daily_journal_entry_async(task_instance, target_date_str: Op
         await _log_generation_attempt(
             session, target_date, "success",
             journal_data["events_processed"], journal_data["events_processed"],
-            task_instance.request.id, "scheduled",
+            self.request.id, "scheduled",
             duration_ms=duration_ms, llm_model="gpt-4o-mini"
         )
 
@@ -138,7 +137,7 @@ async def _generate_daily_journal_entry_async(task_instance, target_date_str: Op
                 duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
                 await _log_generation_attempt(
                     session, target_date, "failure", 0, 0,
-                    task_instance.request.id, "scheduled",
+                    self.request.id, "scheduled",
                     duration_ms=duration_ms, error_message=str(e)
                 )
             except Exception as log_error:
@@ -179,9 +178,8 @@ def manual_generate_journal_entry(
         self._manual_generate_journal_entry_async(target_date_str, admin_user, force_regenerate)
     )
 
-
-async def _manual_generate_journal_entry_async(
-    task_instance,
+    async def _manual_generate_journal_entry_async(
+        self,
     target_date_str: str,
     admin_user: str,
     force_regenerate: bool = False
@@ -225,7 +223,7 @@ async def _manual_generate_journal_entry_async(
             logger.warning(f"Manual generation failed - no content for {target_date}")
             await _log_generation_attempt(
                 session, target_date, "no_events", 0, 0,
-                task_instance.request.id, "manual",
+                self.request.id, "manual",
                 error_message="No events found for journal generation"
             )
             return {
@@ -257,7 +255,7 @@ async def _manual_generate_journal_entry_async(
         await _log_generation_attempt(
             session, target_date, "success",
             journal_data["events_processed"], journal_data["events_processed"],
-            task_instance.request.id, "manual",
+            self.request.id, "manual",
             duration_ms=duration_ms, llm_model="gpt-4o-mini"
         )
 
@@ -282,7 +280,7 @@ async def _manual_generate_journal_entry_async(
                 duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
                 await _log_generation_attempt(
                     session, target_date, "failure", 0, 0,
-                    task_instance.request.id, "manual",
+                    self.request.id, "manual",
                     duration_ms=duration_ms, error_message=str(e)
                 )
             except Exception as log_error:
@@ -314,8 +312,7 @@ def cleanup_old_generation_logs(self, days_to_keep: int = 30) -> Dict[str, Any]:
     import asyncio
     return asyncio.run(self._cleanup_old_generation_logs_async(days_to_keep))
 
-
-async def _cleanup_old_generation_logs_async(task_instance, days_to_keep: int = 30) -> Dict[str, Any]:
+    async def _cleanup_old_generation_logs_async(self, days_to_keep: int = 30) -> Dict[str, Any]:
     """Async implementation of log cleanup"""
     session = None
 
