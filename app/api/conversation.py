@@ -171,23 +171,23 @@ async def handle_conversation(
 
         # Find existing conversation for this session or create new one
         conversation = None
-        print(f"🔍 Looking for existing conversation - Session ID: {request.session_id}, User ID: {user_id}")
-        
+
         if request.session_id:
             # Look for existing active conversation for this session
-            conversation = db.query(Conversation).filter(
-                Conversation.session_id == request.session_id,
-                Conversation.user_id == str(user_id),
-                Conversation.status == 'active'
-            ).first()
-            print(f"🔍 Found existing conversation: {conversation.id if conversation else 'None'}")
-        
+            try:
+                conversation = db.query(Conversation).filter(
+                    Conversation.session_id == request.session_id,
+                    Conversation.user_id == str(user_id),
+                    Conversation.status == 'active'
+                ).first()
+            except Exception as e:
+                conversation = None
+
         if not conversation:
             # Create new conversation if none exists
             conversation_id = uuid.uuid4()
-            print(f"📝 Creating new conversation: {conversation_id}")
             conversation = Conversation(
-                id=conversation_id,
+                id=str(conversation_id),
                 user_id=str(user_id),
                 session_id=request.session_id,
                 status='active',
@@ -198,12 +198,14 @@ async def handle_conversation(
             # Note: Conversation will be committed later with messages
         else:
             conversation_id = conversation.id
-            print(f"♻️ Reusing existing conversation: {conversation_id}")
         
         # Get conversation history from Redis with database fallback (AC: 1, IV1)
         conversation_history_data = redis_service.get_conversation_history(str(conversation_id), db)
         print(f"📚 Retrieved conversation history: {len(conversation_history_data)} messages for conversation {conversation_id}")
         conversation_context = redis_service.build_conversation_context(conversation_history_data)
+
+        # Note: Enhanced conversation service will use its own SessionStateService for conversation history
+        # The old conversation_context is kept for fallback and suggestion turn counting compatibility
         
         # Get suggested word for usage evaluation if available
         suggested_word = recent_suggestion.suggested_word if recent_suggestion else None
@@ -237,7 +239,7 @@ async def handle_conversation(
                 user_message=request.message,
                 user_id=str(user_id),
                 conversation_id=str(conversation_id),
-                conversation_history=conversation_context,
+                conversation_history=None,  # Let enhanced service use its own SessionStateService
                 personality=effective_personality,
                 target_vocabulary=request.target_vocabulary,
                 suggested_word=suggested_word,

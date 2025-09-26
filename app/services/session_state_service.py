@@ -72,6 +72,7 @@ class SessionStateService:
                     "user_mood_indicators": [],
                     "conversation_tone": "neutral"
                 },
+                "conversation_messages": [],  # Store actual conversation messages
                 "session_metadata": {
                     "total_interactions": 0,
                     "session_duration_minutes": 0,
@@ -233,6 +234,107 @@ class SessionStateService:
         except Exception as e:
             logger.error(f"Error updating conversation context: {e}")
             return False
+
+    async def add_conversation_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message_type: str,  # "user" or "assistant"
+        message_content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Add a conversation message to session state.
+
+        Args:
+            user_id: Unique identifier for the user
+            conversation_id: Conversation session identifier
+            message_type: Type of message ("user" or "assistant")
+            message_content: Content of the message
+            metadata: Additional metadata (sentiment, emotion, etc.)
+
+        Returns:
+            True if message added successfully
+        """
+        try:
+            session_state = await self.get_session_state(user_id, conversation_id)
+
+            if not session_state:
+                # Create session if it doesn't exist
+                result = await self.create_session_state(user_id, conversation_id)
+                if not result.get("success"):
+                    return False
+                session_state = result.get("session_state")
+
+            # Add message to conversation history
+            message = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "type": message_type,
+                "content": message_content,
+                "metadata": metadata or {}
+            }
+
+            if "conversation_messages" not in session_state:
+                session_state["conversation_messages"] = []
+
+            session_state["conversation_messages"].append(message)
+
+            # Update session metadata
+            session_state["last_updated"] = datetime.now(timezone.utc).isoformat()
+            session_state["session_metadata"]["total_interactions"] += 1
+            session_state["session_metadata"]["last_activity"] = datetime.now(timezone.utc).isoformat()
+
+            # Store updated state
+            session_id = f"{user_id}:{conversation_id}"
+            success = await self._store_session_state(session_id, session_state)
+
+            logger.debug(f"Added {message_type} message to {session_id}")
+            return success
+
+        except Exception as e:
+            logger.error(f"Error adding conversation message: {e}")
+            return False
+
+    async def get_conversation_history(
+        self,
+        user_id: str,
+        conversation_id: str,
+        max_messages: int = 10
+    ) -> str:
+        """
+        Get formatted conversation history for prompt context.
+
+        Args:
+            user_id: Unique identifier for the user
+            conversation_id: Conversation session identifier
+            max_messages: Maximum number of recent messages to include
+
+        Returns:
+            Formatted conversation history string
+        """
+        try:
+            session_state = await self.get_session_state(user_id, conversation_id)
+
+            if not session_state or "conversation_messages" not in session_state:
+                return ""
+
+            messages = session_state["conversation_messages"]
+
+            # Get recent messages (up to max_messages)
+            recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
+
+            # Format for conversation context
+            history_parts = []
+            for msg in recent_messages:
+                role = "Human" if msg["type"] == "user" else "Clara"
+                content = msg["content"]
+                history_parts.append(f"{role}: {content}")
+
+            return "\n".join(history_parts)
+
+        except Exception as e:
+            logger.error(f"Error getting conversation history: {e}")
+            return ""
 
     async def get_effective_state(
         self,

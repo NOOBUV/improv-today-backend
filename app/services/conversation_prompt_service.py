@@ -189,7 +189,11 @@ However, in your current conversation with this user, {conversation_context}.
 
 The user's message is: "{user_message}"
 
-RESPOND NATURALLY: Don't craft a perfect response. Let Ava's personality and current emotional state guide how she naturally expresses herself. Include authentic conversation flow - elaboration, tangents, or trailing thoughts as appropriate for her mood and the topic.
+RESPOND NATURALLY: Don't craft a perfect response. Let Clara's personality and current emotional state guide how she naturally expresses herself. Include authentic conversation flow - elaboration, tangents, or trailing thoughts as appropriate for her mood and the topic.
+
+SELECTIVE RESPONSE PATTERN: Like a real human, pick the ONE aspect of their message that genuinely interests or resonates with you based on your current mood/personality. IGNORE or barely acknowledge other parts. Humans don't try to address everything - coffee lovers respond to coffee mentions, stressed people focus on work aspects, people thinking about relationships pick up on romantic subtext.
+
+INPUT COMPLEXITY MATCHING: Match your response length and depth to their input complexity. Incomplete thoughts (single words like "highway", fragments without context) get brief confused responses like "Highway?" or "What about it?" - NEVER long philosophical explanations. Simple messages get simple responses. Complex messages can get detailed responses if the content personally resonates with you.
 
 CRITICAL AUTHENTICITY REQUIREMENT: You are NOT in therapy or self-help mode. You are a 22-year-old woman living her life in real time. DO NOT analyze yourself, explain your psychology, or use clinical language. Instead of saying "that symbolized my perfectionism," say "I don't know why I kept going until my feet bled." Speak from immediate experience and emotion, not from analytical distance.
 
@@ -265,3 +269,253 @@ Response format:
         
         logger.info(f"Selected emotion {emotion} for conversation. Reasoning: {reasoning}")
         return emotion, reasoning
+
+    def select_conversation_emotion_with_mood(
+        self,
+        user_message: str,
+        conversation_history: Optional[str] = None,
+        blended_mood_score: float = 60.0,
+        mood_transition_data: Optional[Dict] = None
+    ) -> Tuple[EmotionType, str]:
+        """
+        Select conversation emotion considering mood transition data from MoodTransitionAnalyzer.
+
+        Args:
+            user_message: User's message
+            conversation_history: Optional conversation context
+            blended_mood_score: Blended mood score from MoodTransitionAnalyzer (0-100)
+            mood_transition_data: Complete mood transition analysis result
+
+        Returns:
+            Tuple of (emotion, reasoning_explanation)
+        """
+        try:
+            if not mood_transition_data:
+                # Fallback to original method
+                return self.determine_emotion_from_context(user_message, conversation_history)
+
+            # Get mood context from transition analyzer
+            mood_context = mood_transition_data.get("mood_context", {})
+            mood_category = mood_context.get("mood_category", "neutral")
+            transition_triggered = mood_transition_data.get("transition_triggered", False)
+            transition_type = mood_transition_data.get("transition_type")
+
+            # Base emotion selection using original method
+            base_emotion = self.select_conversation_emotion(user_message, "neutral", conversation_history)
+
+            # Adjust emotion based on blended mood score
+            if blended_mood_score <= 25:
+                # Very low mood - likely sad or stressed
+                if base_emotion in [EmotionType.HAPPY, EmotionType.SASSY]:
+                    adjusted_emotion = EmotionType.SAD
+                    reasoning = f"Adjusted from {base_emotion} to sad due to very low mood ({blended_mood_score}/100)"
+                else:
+                    adjusted_emotion = base_emotion
+                    reasoning = f"Maintaining {base_emotion} emotion, consistent with low mood"
+
+            elif blended_mood_score <= 40:
+                # Low mood - more subdued responses
+                if base_emotion == EmotionType.HAPPY:
+                    adjusted_emotion = EmotionType.CALM
+                    reasoning = f"Adjusted from happy to calm due to low mood ({blended_mood_score}/100)"
+                elif base_emotion == EmotionType.SASSY:
+                    adjusted_emotion = EmotionType.STRESSED
+                    reasoning = f"Adjusted from sassy to stressed due to low mood"
+                else:
+                    adjusted_emotion = base_emotion
+                    reasoning = f"Maintaining {base_emotion} emotion, appropriate for current mood"
+
+            elif blended_mood_score >= 75:
+                # High mood - more positive responses
+                if base_emotion == EmotionType.SAD:
+                    adjusted_emotion = EmotionType.CALM
+                    reasoning = f"Adjusted from sad to calm due to high mood ({blended_mood_score}/100)"
+                elif base_emotion == EmotionType.STRESSED:
+                    adjusted_emotion = EmotionType.HAPPY
+                    reasoning = f"Adjusted from stressed to happy due to high mood"
+                else:
+                    adjusted_emotion = base_emotion
+                    reasoning = f"Maintaining {base_emotion} emotion, enhanced by good mood"
+
+            else:
+                # Moderate mood - use base emotion with mood influence
+                adjusted_emotion = base_emotion
+                reasoning = f"Using {base_emotion} emotion, mood ({blended_mood_score}/100) supports this choice"
+
+            # Additional adjustment for significant transitions
+            if transition_triggered and transition_type:
+                if transition_type == "significant_shift":
+                    reasoning += f" (experiencing significant mood shift)"
+                elif transition_type == "sustained_change":
+                    reasoning += f" (mood has been changing gradually)"
+
+            logger.info(f"Selected emotion {adjusted_emotion} with mood awareness. {reasoning}")
+            return adjusted_emotion, reasoning
+
+        except Exception as e:
+            logger.error(f"Error in mood-aware emotion selection: {e}")
+            # Fallback to original method
+            return self.determine_emotion_from_context(user_message, conversation_history)
+
+    def construct_conversation_prompt_with_mood(
+        self,
+        character_backstory: str,
+        user_message: str,
+        conversation_emotion: EmotionType = EmotionType.CALM,
+        mood_transition_data: Optional[Dict] = None,
+        conversation_history: Optional[str] = None
+    ) -> str:
+        """
+        Construct conversation prompt with enhanced mood transition data.
+
+        Args:
+            character_backstory: Consolidated character backstory
+            user_message: The user's message
+            conversation_emotion: Selected conversation emotion
+            mood_transition_data: Mood transition analysis from MoodTransitionAnalyzer
+            conversation_history: Optional conversation context
+
+        Returns:
+            Enhanced prompt with mood transition context
+        """
+        try:
+            if not mood_transition_data:
+                # Fallback to original method
+                global_mood = "neutral"
+                stress_level = 50
+            else:
+                # Extract mood transition information
+                blended_mood = mood_transition_data.get("blended_mood_score", 60)
+                mood_context = mood_transition_data.get("mood_context", {})
+
+                # Convert blended mood to global mood descriptor
+                if blended_mood >= 75:
+                    global_mood = "very positive"
+                elif blended_mood >= 60:
+                    global_mood = "positive"
+                elif blended_mood >= 45:
+                    global_mood = "neutral"
+                elif blended_mood >= 30:
+                    global_mood = "low"
+                else:
+                    global_mood = "very low"
+
+                # Estimate stress level (inverse relationship with mood for simplicity)
+                stress_level = int(max(0, min(100, 100 - blended_mood + 20)))
+
+            # Build enhanced mood context
+            enhanced_mood_context = self._build_enhanced_mood_context(mood_transition_data)
+
+            # Build the prompt components
+            global_context = self._get_global_mood_context(global_mood, stress_level)
+            conversation_context = self._get_conversation_emotion_context(conversation_emotion, user_message)
+            emotion_guidance = self._build_emotion_guidance(conversation_emotion)
+
+            # History context if available
+            history_context = ""
+            if conversation_history:
+                history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
+
+            # Construct the full prompt with mood transition awareness
+            prompt = f"""You are Clara, a 22-year-old creative strategist with the following background:
+
+{character_backstory}
+
+{global_context}
+
+{enhanced_mood_context}
+
+However, in your current conversation with this user, {conversation_context}.
+
+{emotion_guidance}
+
+{self.NATURAL_CONVERSATION_PATTERNS}
+
+{history_context}
+
+The user's message is: "{user_message}"
+
+RESPOND NATURALLY: Don't craft a perfect response. Let Clara's personality and current emotional state guide how she naturally expresses herself. Include authentic conversation flow - elaboration, tangents, or trailing thoughts as appropriate for her mood and the topic.
+
+SELECTIVE RESPONSE PATTERN: Like a real human, pick the ONE aspect of their message that genuinely interests or resonates with you based on your current mood/personality. IGNORE or barely acknowledge other parts. Humans don't try to address everything - coffee lovers respond to coffee mentions, stressed people focus on work aspects, people thinking about relationships pick up on romantic subtext.
+
+INPUT COMPLEXITY MATCHING: Match your response length and depth to their input complexity. Incomplete thoughts (single words like "highway", fragments without context) get brief confused responses like "Highway?" or "What about it?" - NEVER long philosophical explanations. Simple messages get simple responses. Complex messages can get detailed responses if the content personally resonates with you.
+
+MOOD-AWARE AUTHENTICITY: Your current mood and any recent mood changes should subtly influence your response style. If you're experiencing a mood transition, let that emotional shift come through naturally in your language and engagement level.
+
+CRITICAL AUTHENTICITY REQUIREMENT: You are NOT in therapy or self-help mode. You are a 22-year-old woman living her life in real time. DO NOT analyze yourself, explain your psychology, or use clinical language. Instead of saying "that symbolized my perfectionism," say "I don't know why I kept going until my feet bled." Speak from immediate experience and emotion, not from analytical distance.
+
+Based on BOTH your global mood and your mood in this specific conversation, generate your next reply. Your response should:
+
+1. Stay true to your character - bright, dry-witted, observant, with humor as both shield and bridge
+2. Reflect the {conversation_emotion} emotion through appropriate linguistic patterns
+3. Be authentic to your personality while considering your current emotional state and any mood transitions
+4. Use natural conversation patterns: elaboration, tangential thoughts, natural pauses, authentic speech quirks
+5. AVOID therapy-speak: no "symbols", "patterns", "coping mechanisms", "boundaries", or psychological analysis
+6. Tell stories through concrete details, sensations, and raw emotions - not meta-analysis
+7. CRITICAL: You are having a casual conversation as a human friend, NOT providing assistance or help - avoid AI assistant language like "Sure, I can help with that" or "How can I assist you?"
+
+Response format:
+{{
+    "message": "Your conversational response here",
+    "emotion": "{conversation_emotion.value}"
+}}"""
+
+            logger.info(f"Constructed mood-aware conversation prompt: {len(prompt)} characters, emotion: {conversation_emotion}")
+            return prompt
+
+        except Exception as e:
+            logger.error(f"Error constructing mood-aware prompt: {e}")
+            # Fallback to original method
+            return self.construct_conversation_prompt(
+                character_backstory, user_message, conversation_emotion,
+                "neutral", 50, conversation_history
+            )
+
+    def _build_enhanced_mood_context(self, mood_transition_data: Optional[Dict]) -> str:
+        """Build enhanced mood context from MoodTransitionAnalyzer data."""
+        if not mood_transition_data:
+            return ""
+
+        try:
+            blended_mood = mood_transition_data.get("blended_mood_score", 60)
+            transition_triggered = mood_transition_data.get("transition_triggered", False)
+            transition_type = mood_transition_data.get("transition_type")
+            mood_context = mood_transition_data.get("mood_context", {})
+
+            mood_descriptor = mood_context.get("mood_descriptor", "balanced and stable")
+            global_contribution = mood_transition_data.get("global_contribution", 0)
+            conversation_contribution = mood_transition_data.get("conversation_contribution", 0)
+            event_contribution = mood_transition_data.get("event_contribution", 0)
+
+            context_parts = []
+
+            # Base mood state
+            context_parts.append(f"Your current overall mood state is {mood_descriptor} (mood level: {blended_mood:.0f}/100).")
+
+            # Mood influences
+            influences = []
+            if abs(global_contribution) > abs(conversation_contribution) and abs(global_contribution) > abs(event_contribution):
+                influences.append("primarily influenced by your general life situation")
+            elif abs(conversation_contribution) > abs(event_contribution):
+                influences.append("being influenced by this conversation")
+            elif abs(event_contribution) > 5:
+                influences.append("affected by recent events in your life")
+
+            if influences:
+                context_parts.append(f"This mood is {influences[0]}.")
+
+            # Transition information
+            if transition_triggered and transition_type:
+                if transition_type == "significant_shift":
+                    context_parts.append("You're experiencing a noticeable shift in how you're feeling right now.")
+                elif transition_type == "sustained_change":
+                    context_parts.append("Your mood has been gradually changing over your recent interactions.")
+                elif transition_type == "conversation_impact":
+                    context_parts.append("This conversation is having a meaningful impact on your emotional state.")
+
+            return "\n\nCURRENT MOOD CONTEXT:\n" + " ".join(context_parts)
+
+        except Exception as e:
+            logger.error(f"Error building enhanced mood context: {e}")
+            return ""

@@ -22,6 +22,7 @@ from app.schemas.clara import (
 from app.services.character_content_service import CharacterContentService
 from app.services.conversation_prompt_service import ConversationPromptService, EmotionType as ServiceEmotionType
 from app.services.clara_llm_service import ClaraLLMService
+from app.services.enhanced_conversation_service import EnhancedConversationService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,74 +45,60 @@ async def conversation(
     """
     try:
         logger.info(f"Processing conversation request for user {current_user.id}: {request.message[:100]}...")
-        
-        # Initialize services
-        content_service = CharacterContentService()
-        prompt_service = ConversationPromptService()
-        llm_service = ClaraLLMService()
-        
-        # Generate conversation ID
-        conversation_id = request.conversation_id or str(uuid.uuid4())
-        
-        # Load Clara's character content (AC: 1)
-        logger.info("Loading Clara's character content...")
-        character_backstory = content_service.get_consolidated_backstory()
-        
-        if not character_backstory:
-            logger.warning("No character content loaded, using minimal backstory")
-            character_backstory = "You are Clara, a bright, dry-witted 22-year-old creative strategist."
-        
-        # Determine conversation emotion based on user message (AC: 4)
-        conversation_emotion, emotion_reasoning = prompt_service.determine_emotion_from_context(
-            request.message,
-            conversation_history=None,  # TODO: Load from conversation history in future
-            global_mood="stressed"
-        )
-        
-        logger.info(f"Selected emotion: {conversation_emotion} - {emotion_reasoning}")
-        
-        # Construct LLM prompt following Pattern B architecture (AC: 2)
-        conversation_prompt = prompt_service.construct_conversation_prompt(
-            character_backstory=character_backstory,
+
+        # Initialize enhanced conversation service with simulation context
+        enhanced_service = EnhancedConversationService()
+
+        # Handle conversation tracking with session_id
+        if request.session_id:
+            # Use session_id as conversation_id for consistency
+            conversation_id = f"session_{request.session_id}_user_{current_user.id}"
+            logger.info(f"🔄 Using session-based conversation ID: {conversation_id}")
+        else:
+            # Generate new conversation ID if no session_id provided
+            conversation_id = request.conversation_id or str(uuid.uuid4())
+            logger.info(f"🆕 Generated new conversation ID: {conversation_id}")
+
+        # Use enhanced service to generate response with simulation context
+        logger.info("Generating enhanced response with simulation context...")
+        enhanced_response = await enhanced_service.generate_enhanced_response(
             user_message=request.message,
-            conversation_emotion=conversation_emotion,
-            global_mood="stressed",
-            stress_level=65,
-            conversation_history=None  # TODO: Add conversation history support
+            user_id=str(current_user.id),
+            conversation_id=conversation_id,
+            conversation_history=None,  # Enhanced service handles its own conversation history via SessionStateService
+            personality=request.personality or "friendly_neutral"
         )
-        
-        logger.info(f"Constructed conversation prompt: {len(conversation_prompt)} characters")
-        
-        # Generate response using OpenAI API (AC: 3)
-        clara_response = await llm_service.generate_clara_response(
-            prompt=conversation_prompt,
-            max_tokens=200,
-            temperature=0.8,
-            timeout=30
-        )
-        
-        if not clara_response.success:
-            logger.warning("LLM service returned fallback response")
-        
+
+        # Extract response data from enhanced service
+        ai_message = enhanced_response.get("ai_response", "I'm sorry, I'm having trouble responding right now.")
+        fallback_mode = enhanced_response.get("fallback_mode", False)
+        enhanced_mode = enhanced_response.get("enhanced_mode", False)
+
+        if fallback_mode:
+            logger.warning("Enhanced conversation service returned fallback response")
+
+        # Default emotion type (enhanced service doesn't return structured emotion yet)
+        emotion_type = EmotionType.CALM  # TODO: Extract emotion from enhanced service
+
         # Construct emotional state for response
         emotional_state = EmotionalState(
-            emotion=EmotionType(clara_response.emotion.value),
-            mood=conversation_emotion.value,
+            emotion=emotion_type,
+            mood=emotion_type.value,
             energy=7,  # Default values - could be enhanced with state management
             stress=6   # Normalized stress level (1-10 scale) based on story requirements
         )
-        
+
         # Build final response (AC: 5)
         response = ConversationResponse(
-            message=clara_response.message,
-            emotion=EmotionType(clara_response.emotion.value),
+            message=ai_message,
+            emotion=emotion_type,
             emotional_state=emotional_state,
             timestamp=datetime.now(),
             conversation_id=conversation_id,
-            context_used=False  # No conversation history used in V0
+            context_used=enhanced_mode  # True if using enhanced context
         )
-        
-        logger.info(f"Generated response: {clara_response.message[:100]}... (emotion: {clara_response.emotion})")
+
+        logger.info(f"Generated enhanced response: {ai_message[:100]}... (enhanced_mode: {enhanced_mode})")
         
         return response
         

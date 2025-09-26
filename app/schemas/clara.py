@@ -18,6 +18,8 @@ class ConversationRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User's message to Clara")
     user_id: Optional[str] = Field(None, description="Optional user identifier")
     conversation_id: Optional[str] = Field(None, description="Optional conversation ID for context")
+    session_id: Optional[int] = Field(None, description="Session ID for conversation tracking")
+    personality: Optional[str] = Field(None, description="Conversation personality style")
 
 
 class EmotionalState(BaseModel):

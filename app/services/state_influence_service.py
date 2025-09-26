@@ -10,6 +10,7 @@ from enum import Enum
 
 from app.services.session_state_service import SessionStateService
 from app.services.simulation.state_manager import StateManagerService
+from app.services.mood_transition_analyzer import MoodTransitionAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class StateInfluenceService:
     def __init__(self):
         self.session_service = SessionStateService()
         self.state_manager = StateManagerService()
+        self.mood_analyzer = MoodTransitionAnalyzer()
 
         # Configure influence weights for different scenarios
         self.scenario_weights = {
@@ -90,7 +92,9 @@ class StateInfluenceService:
         user_id: str,
         conversation_id: str,
         scenario: ConversationScenario = ConversationScenario.CASUAL_CHAT,
-        user_preferences: Optional[Dict[str, Any]] = None
+        user_preferences: Optional[Dict[str, Any]] = None,
+        conversation_sentiment: float = 0.0,
+        recent_events: Optional[List] = None
     ) -> Dict[str, Any]:
         """
         Build comprehensive conversation context by merging global and session state.
@@ -100,9 +104,11 @@ class StateInfluenceService:
             conversation_id: Conversation session identifier
             scenario: Type of conversation scenario
             user_preferences: User-specific preferences for state influence
+            conversation_sentiment: Current conversation sentiment (-1 to 1)
+            recent_events: List of recent GlobalEvents affecting mood
 
         Returns:
-            Complete conversation context with merged state influence
+            Complete conversation context with merged state influence and mood transitions
         """
         try:
             logger.info(f"Building conversation context for user {user_id}, scenario: {scenario.value}")
@@ -128,7 +134,38 @@ class StateInfluenceService:
                 self._build_relationship_context(session_state, scenario)
             )
 
-            logger.debug(f"Built conversation context with {len(conversation_context)} elements")
+            # Add mood transition analysis
+            if recent_events is None:
+                recent_events = []
+
+            session_context = {
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "scenario": scenario.value
+            }
+
+            mood_transition_result = await self.mood_analyzer.analyze_mood_transition(
+                effective_state, recent_events, conversation_sentiment, session_context
+            )
+
+            # Add mood transition data to conversation context
+            conversation_context.update({
+                "mood_transition": {
+                    "blended_mood_score": mood_transition_result.blended_mood_score,
+                    "transition_triggered": mood_transition_result.transition_triggered,
+                    "transition_type": mood_transition_result.transition_type.value if mood_transition_result.transition_type else None,
+                    "transition_magnitude": mood_transition_result.transition_magnitude,
+                    "mood_stability_index": mood_transition_result.mood_stability_index,
+                    "mood_context": mood_transition_result.mood_context,
+
+                    # Component contributions for debugging/analysis
+                    "global_contribution": mood_transition_result.global_mood_contribution,
+                    "conversation_contribution": mood_transition_result.conversation_contribution,
+                    "event_contribution": mood_transition_result.event_contribution
+                }
+            })
+
+            logger.debug(f"Built conversation context with {len(conversation_context)} elements including mood transitions")
             return conversation_context
 
         except Exception as e:
