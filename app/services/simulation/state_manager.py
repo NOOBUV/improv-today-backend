@@ -481,7 +481,7 @@ class StateManagerService:
                 last_event_id=event_id
             )
 
-            updated_state = await repo.create_or_update_ava_state(trait_name, update_data)
+            updated_state = await repo.create_or_update_clara_state(trait_name, update_data)
             logger.debug(f"Updated {trait_name}: {current_value} -> {new_value} ({change_amount:+d})")
 
             return updated_state
@@ -579,7 +579,7 @@ class StateManagerService:
                                 max_value=config["max"]
                             )
 
-                            await repo.create_or_update_ava_state(trait_name, create_data)
+                            await repo.create_or_update_clara_state(trait_name, create_data)
                             initialized_traits.append(trait_name)
                             logger.info(f"Initialized default state for {trait_name}")
 

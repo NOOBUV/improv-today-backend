@@ -58,7 +58,8 @@ class EnhancedConversationService:
         personality: str = "friendly_neutral",
         target_vocabulary: Optional[List[Dict]] = None,
         suggested_word: Optional[str] = None,
-        user_preferences: Optional[Dict[str, Any]] = None
+        user_preferences: Optional[Dict[str, Any]] = None,
+        fresh_events: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Generate enhanced conversation response with simulation context integration.
@@ -73,6 +74,7 @@ class EnhancedConversationService:
             target_vocabulary: Target vocabulary words
             suggested_word: Previously suggested word to evaluate
             user_preferences: User-specific preferences
+            fresh_events: Pre-selected fresh events to avoid repetition
 
         Returns:
             Enhanced conversation response with simulation context and performance metrics
@@ -107,7 +109,7 @@ class EnhancedConversationService:
                 # Step 1: Gather simulation context with timing
                 context_start = time.time()
                 simulation_context = await self._gather_simulation_context(
-                    user_message, user_id, conversation_id, user_preferences
+                    user_message, user_id, conversation_id, user_preferences, fresh_events
                 )
                 timing_metrics["context_gathering_ms"] = (time.time() - context_start) * 1000
 
@@ -227,7 +229,8 @@ class EnhancedConversationService:
         user_message: str,
         user_id: str,
         conversation_id: str,
-        user_preferences: Optional[Dict[str, Any]] = None
+        user_preferences: Optional[Dict[str, Any]] = None,
+        fresh_events: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """Gather all simulation context for conversation enhancement."""
 
@@ -239,27 +242,34 @@ class EnhancedConversationService:
             context["global_state"] = global_state
             logger.debug(f"Retrieved global state: {len(global_state)} traits")
 
-            # Use event selection service to get fresh, contextually relevant events
+            # Use provided fresh events or fetch new ones if not provided
             # This prevents Clara from repeating the same events to the same user
-            fresh_events = await self.event_selection_service.get_contextual_events(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                user_message=user_message,
-                max_events=self.config.MAX_EVENTS_COUNT
-            )
+            if fresh_events is not None:
+                logger.info(f"Using pre-selected fresh events: {len(fresh_events)} events")
+                # Use provided fresh events (already filtered for this user)
+                fresh_events_data = fresh_events
+            else:
+                logger.info("Fetching fresh events from event selection service")
+                # Fetch fresh, contextually relevant events
+                fresh_events_data = await self.event_selection_service.get_contextual_events(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    max_events=self.config.MAX_EVENTS_COUNT
+                )
 
             # Convert fresh events back to format expected by rest of system
-            context["recent_events"] = [event.get("original_event", event) for event in fresh_events]
+            context["recent_events"] = [event.get("original_event", event) for event in fresh_events_data]
             context["content_selection_metadata"] = {
                 "strategy": "fresh_events_rotation",
                 "entities_found": [],
-                "total_analyzed": len(fresh_events),
-                "selected_count": len(fresh_events),
-                "fresh_events_used": [event.get("id") for event in fresh_events]
+                "total_analyzed": len(fresh_events_data),
+                "selected_count": len(fresh_events_data),
+                "fresh_events_used": [event.get("id") for event in fresh_events_data]
             }
 
-            logger.info(f"Fresh events selection: {len(fresh_events)} events selected")
-            logger.debug(f"Selected fresh events: {[event.get('id') for event in fresh_events]}")
+            logger.info(f"Fresh events selection: {len(fresh_events_data)} events selected")
+            logger.debug(f"Selected fresh events: {[event.get('id') for event in fresh_events_data]}")
 
             # Select relevant backstory content (reduced weight since we now prioritize recent events)
             backstory_context = await self.contextual_backstory_service.select_relevant_content(

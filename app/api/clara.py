@@ -23,6 +23,7 @@ from app.services.character_content_service import CharacterContentService
 from app.services.conversation_prompt_service import ConversationPromptService, EmotionType as ServiceEmotionType
 from app.services.clara_llm_service import ClaraLLMService
 from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.event_selection_service import EventSelectionService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,8 +47,9 @@ async def conversation(
     try:
         logger.info(f"Processing conversation request for user {current_user.id}: {request.message[:100]}...")
 
-        # Initialize enhanced conversation service with simulation context
+        # Initialize services
         enhanced_service = EnhancedConversationService()
+        event_service = EventSelectionService()
 
         # Handle conversation tracking with session_id
         if request.session_id:
@@ -59,23 +61,47 @@ async def conversation(
             conversation_id = request.conversation_id or str(uuid.uuid4())
             logger.info(f"🆕 Generated new conversation ID: {conversation_id}")
 
-        # Use enhanced service to generate response with simulation context
+        # Get fresh events to avoid repetition before generating response
+        logger.info("Getting fresh events for conversation context...")
+        fresh_events = await event_service.get_contextual_events(
+            user_id=str(current_user.id),
+            conversation_id=conversation_id,
+            user_message=request.message,
+            max_events=2  # Limit to 2 events to avoid overwhelming Clara
+        )
+        logger.info(f"Retrieved {len(fresh_events)} fresh events for conversation context")
+
+        # Use enhanced service to generate response with simulation context and fresh events
         logger.info("Generating enhanced response with simulation context...")
         enhanced_response = await enhanced_service.generate_enhanced_response(
             user_message=request.message,
             user_id=str(current_user.id),
             conversation_id=conversation_id,
             conversation_history=None,  # Enhanced service handles its own conversation history via SessionStateService
-            personality=request.personality or "friendly_neutral"
+            personality=request.personality or "friendly_neutral",
+            fresh_events=fresh_events  # Pass fresh events to avoid repetition
         )
 
         # Extract response data from enhanced service
         ai_message = enhanced_response.get("ai_response", "I'm sorry, I'm having trouble responding right now.")
         fallback_mode = enhanced_response.get("fallback_mode", False)
         enhanced_mode = enhanced_response.get("enhanced_mode", False)
+        events_mentioned = enhanced_response.get("events_mentioned", [])
 
         if fallback_mode:
             logger.warning("Enhanced conversation service returned fallback response")
+
+        # Track events mentioned in Clara's response to prevent future repetition
+        if events_mentioned:
+            logger.info(f"Tracking {len(events_mentioned)} events mentioned in response...")
+            await event_service.track_events_mentioned_in_response(
+                user_id=str(current_user.id),
+                conversation_id=conversation_id,
+                events_mentioned=events_mentioned
+            )
+            logger.info("Events tracked successfully")
+        else:
+            logger.info("No events mentioned in response - no tracking needed")
 
         # Default emotion type (enhanced service doesn't return structured emotion yet)
         emotion_type = EmotionType.CALM  # TODO: Extract emotion from enhanced service
