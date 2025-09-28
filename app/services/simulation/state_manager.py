@@ -42,7 +42,7 @@ class StateManagerService:
 
         self._recent_events_cache = {}
         self._recent_events_cache_timestamp = 0
-        self._recent_events_cache_ttl = 600  # 10 minutes in seconds
+        self._recent_events_cache_ttl = 3600  # 1 hour in seconds (aligned with hourly event generation)
 
         # Circuit breaker for performance optimization
         self._circuit_breaker_failures = 0
