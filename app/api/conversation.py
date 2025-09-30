@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.auth.dependencies import verify_protected_token
 from app.services.simple_openai import SimpleOpenAIService, OpenAICoachingResponse, WordUsageStatus
 from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.streaming_conversation_service import StreamingConversationService
 from app.services.redis_service import RedisService
 from app.services.vocabulary_tier_service import VocabularyTierService
 from app.services.suggestion_service import SuggestionService
@@ -582,5 +584,111 @@ def _generate_tier_suggestions(tier_analysis) -> List[str]:
         suggestions.append("Try expressing your thoughts in more detail")
     elif tier_analysis.word_count > 50:
         suggestions.append("Great detailed response! Practice being concise too")
-    
+
     return suggestions[:3]  # Return top 3 suggestions
+
+
+# Story 3.3: Streaming conversation endpoint for optimized performance
+@router.post("/stream")
+async def stream_conversation(
+    request: ConversationRequest,
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(verify_protected_token)
+):
+    """
+    Stream conversation response using Server-Sent Events (SSE) for optimized performance.
+
+    Provides progressive response delivery to reduce perceived latency from ~6.4s to <500ms
+    for first meaningful content. Maintains compatibility with existing conversation API.
+
+    Events streamed:
+    - processing_start: Initial acknowledgment
+    - context_ready: Context gathering completed
+    - consciousness_chunk: Progressive AI response chunks
+    - analysis_ready: Vocabulary analysis completed
+    - suggestion_ready: New vocabulary suggestion available
+    - processing_complete: Final response with all metadata
+    """
+    try:
+        # Get or create user from Auth0 token
+        user_id = get_or_create_user(db, current_user)
+
+        # Load personality and topic from session if session_id provided
+        session_personality = request.personality
+        if request.session_id:
+            from app.models.session import Session as SessionModel
+            session_row = db.query(SessionModel).filter(SessionModel.id == request.session_id).first()
+            if not session_row:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session_personality = session_personality or (session_row.personality or "friendly_neutral")
+            # update last_message_at
+            session_row.last_message_at = datetime.now(timezone.utc)
+            db.commit()
+
+        # Find existing conversation for this session or create new one
+        conversation = None
+        if request.session_id:
+            try:
+                conversation = db.query(Conversation).filter(
+                    Conversation.session_id == request.session_id,
+                    Conversation.user_id == str(user_id),
+                    Conversation.status == 'active'
+                ).first()
+            except Exception as e:
+                conversation = None
+
+        if not conversation:
+            # Create new conversation if none exists
+            conversation_id = str(uuid.uuid4())
+            conversation = Conversation(
+                id=conversation_id,
+                user_id=str(user_id),
+                session_id=request.session_id,
+                status='active',
+                personality=session_personality or "friendly_neutral"
+            )
+            db.add(conversation)
+            db.flush()
+        else:
+            conversation_id = conversation.id
+
+        # Retrieve user preferences from session for personalization
+        from app.services.session_state_service import SessionStateService
+        session_service = SessionStateService()
+        try:
+            session_state = await session_service.get_session_state(str(user_id), conversation_id)
+            user_preferences = session_state.get("personalization", {}) if session_state else {}
+        except Exception as e:
+            print(f"⚠️ Could not retrieve session personalization, using defaults: {str(e)}")
+            user_preferences = {}
+
+        # Initialize streaming conversation service
+        streaming_service = StreamingConversationService()
+
+        # Stream the conversation response
+        response_stream = streaming_service.stream_conversation_response(
+            user_message=request.message,
+            user_id=str(user_id),
+            conversation_id=conversation_id,
+            session_id=request.session_id,
+            personality=session_personality,
+            target_vocabulary=request.target_vocabulary,
+            user_preferences=user_preferences,
+            db=db
+        )
+
+        # Return SSE streaming response
+        return StreamingResponse(
+            response_stream,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control"
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ Streaming Conversation Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Streaming conversation failed: {str(e)}")
