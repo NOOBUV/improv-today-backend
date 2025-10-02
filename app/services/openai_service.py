@@ -1,4 +1,4 @@
-import openai
+from openai import AsyncOpenAI
 from app.core.config import settings
 
 class OpenAIService:
@@ -9,21 +9,11 @@ class OpenAIService:
             self.client = None
         else:
             try:
-                # Initialize OpenAI client (version 1.x compatible)
-                from openai import OpenAI
-                self.client = OpenAI(api_key=settings.openai_api_key)
-                print("✅ OpenAI client initialized successfully")
-            except ImportError:
-                try:
-                    # Fallback for older versions
-                    openai.api_key = settings.openai_api_key
-                    self.client = openai
-                    print("✅ OpenAI (legacy) client initialized successfully")
-                except Exception as e:
-                    print(f"❌ Failed to initialize OpenAI client: {e}")
-                    self.client = None
+                # Initialize AsyncOpenAI client
+                self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+                print("✅ AsyncOpenAI client initialized successfully")
             except Exception as e:
-                print(f"❌ Failed to initialize OpenAI client: {e}")
+                print(f"❌ Failed to initialize AsyncOpenAI client: {e}")
                 self.client = None
     
     async def generate_response(self, message: str, context: str = "") -> str:
@@ -40,13 +30,13 @@ class OpenAIService:
                 {"role": "user", "content": f"Context: {context}\nMessage: {message}"}
             ]
             
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=150,
                 temperature=0.7
             )
-            
+
             return response.choices[0].message.content
         except Exception as e:
             print(f"OpenAI API Error: {str(e)}")
@@ -78,13 +68,13 @@ Be encouraging and respond naturally to what they say."""
                 {"role": "user", "content": message}
             ]
             
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=100,
                 temperature=0.8
             )
-            
+
             return response.choices[0].message.content.strip()
             
         except Exception as e:

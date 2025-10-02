@@ -3,12 +3,13 @@ Enhanced Conversation Service for Story 2.6: Enhanced Conversational Context Int
 Orchestrates context gathering from simulation, state, and character services.
 """
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncGenerator, Union
 from datetime import datetime, timezone
 import json
 import time
 import uuid
 import traceback
+import asyncio
 
 from app.core.conversation_config import conversation_config
 from app.services.contextual_backstory_service import ContextualBackstoryService
@@ -21,7 +22,7 @@ from app.services.dynamic_content_selector import DynamicContentSelector
 from app.services.session_state_service import SessionStateService
 from app.services.event_selection_service import EventSelectionService
 from app.core.config import settings
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ class EnhancedConversationService:
         self.dynamic_content_selector = DynamicContentSelector()
         self.session_state_service = SessionStateService()
         self.event_selection_service = EventSelectionService()
-        self.openai_client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
         self.performance_monitor = ConversationPerformanceMonitor()
 
     async def generate_enhanced_response(
@@ -300,8 +301,9 @@ class EnhancedConversationService:
         target_vocabulary: Optional[List[Dict]] = None,
         suggested_word: Optional[str] = None,
         user_preferences: Optional[Dict[str, Any]] = None,
-        fresh_events: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        fresh_events: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = False
+    ):
         """
         Generate enhanced conversation response with comprehensive performance monitoring.
         Includes detailed timing breakdown, correlation IDs, and threshold alerting.
@@ -316,9 +318,11 @@ class EnhancedConversationService:
             suggested_word: Previously suggested word to evaluate
             user_preferences: User-specific preferences
             fresh_events: Pre-selected fresh events to avoid repetition
+            stream: If True, returns AsyncGenerator for SSE streaming; if False, returns Dict
 
         Returns:
-            Enhanced conversation response with comprehensive performance metrics
+            If stream=False: Dict with enhanced conversation response and performance metrics
+            If stream=True: AsyncGenerator yielding SSE events progressively
         """
         # Create correlation ID for this conversation request
         correlation_id = self.performance_monitor.create_conversation_correlation_id(user_id, conversation_id)
@@ -347,7 +351,7 @@ class EnhancedConversationService:
                 conversation_history = await self.session_state_service.get_conversation_history(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    max_messages=10
+                    max_messages=4  # Reduced from 10 to 4 (2 exchanges) for faster TTFT
                 )
 
             self.performance_monitor.end_sub_operation(
@@ -358,6 +362,8 @@ class EnhancedConversationService:
             )
 
             # Sub-operation 2: Context gathering with detailed breakdown
+            context_start = time.time()
+            print(f"⏱️  [{correlation_id}] Starting context gathering...", flush=True)
             context_sub_context = self.performance_monitor.time_sub_operation(timing_context, "context_gathering")
             simulation_context = {}
 
@@ -365,6 +371,9 @@ class EnhancedConversationService:
                 simulation_context = await self._gather_simulation_context_with_monitoring(
                     user_message, user_id, conversation_id, user_preferences, fresh_events, timing_context
                 )
+
+                context_time = (time.time() - context_start) * 1000
+                print(f"⏱️  [{correlation_id}] Context gathering completed: {context_time:.0f}ms", flush=True)
 
                 self.performance_monitor.end_sub_operation(
                     timing_context, "context_gathering", context_sub_context,
@@ -386,14 +395,31 @@ class EnhancedConversationService:
                 try:
                     consciousness_context = self.performance_monitor.time_sub_operation(timing_context, "consciousness_generation")
 
-                    response = await self._generate_context_aware_response_with_monitoring(
-                        user_message=user_message,
-                        simulation_context=simulation_context,
-                        conversation_history=conversation_history,
-                        personality=personality,
-                        suggested_word=suggested_word,
-                        timing_context=timing_context
-                    )
+                    # Branch: streaming vs non-streaming response
+                    if stream:
+                        print(f"⏱️  [{correlation_id}] Returning streaming generator (will execute when consumed)", flush=True)
+                        # Return async generator for SSE streaming
+                        return self._stream_context_aware_response(
+                            user_message=user_message,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            simulation_context=simulation_context,
+                            conversation_history=conversation_history,
+                            personality=personality,
+                            suggested_word=suggested_word,
+                            timing_context=timing_context,
+                            correlation_id=correlation_id
+                        )
+                    else:
+                        # Non-streaming: wait for complete response
+                        response = await self._generate_context_aware_response_with_monitoring(
+                            user_message=user_message,
+                            simulation_context=simulation_context,
+                            conversation_history=conversation_history,
+                            personality=personality,
+                            suggested_word=suggested_word,
+                            timing_context=timing_context
+                        )
 
                     self.performance_monitor.end_sub_operation(
                         timing_context, "consciousness_generation", consciousness_context,
@@ -869,6 +895,235 @@ class EnhancedConversationService:
         except Exception as e:
             logger.error(f"Error generating context-aware response: {str(e)}")
             raise
+
+    async def _stream_context_aware_response(
+        self,
+        user_message: str,
+        user_id: str,
+        conversation_id: str,
+        simulation_context: Dict[str, Any],
+        conversation_history: Optional[str] = None,
+        personality: str = "friendly_neutral",
+        suggested_word: Optional[str] = None,
+        timing_context: Optional[Dict[str, Any]] = None,
+        correlation_id: str = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream context-aware response progressively using Server-Sent Events.
+
+        Yields SSE-formatted events as OpenAI generates response chunks.
+        Handles all the same context integration as non-streaming mode.
+        """
+        start_time = time.time()
+        print(f"⏱️  [{correlation_id}] STREAM START - Beginning context-aware response generation", flush=True)
+
+        try:
+            # Yield initial processing acknowledgment
+            yield self._format_sse_event("processing_start", {
+                "correlation_id": correlation_id,
+                "status": "starting",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            # Extract context components (same as non-streaming)
+            context_start = time.time()
+            recent_events = simulation_context.get("recent_events", [])
+            global_state = simulation_context.get("global_state", {})
+            conversation_influence = simulation_context.get("conversation_influence", {})
+            selected_backstory = simulation_context.get("selected_backstory", {})
+            content_metadata = simulation_context.get("content_selection_metadata", {})
+            context_extract_time = (time.time() - context_start) * 1000
+            print(f"⏱️  [{correlation_id}] Context extraction: {context_extract_time:.0f}ms", flush=True)
+
+            mood_transition_data = conversation_influence.get("mood_transition", {})
+            blended_mood = mood_transition_data.get("blended_mood_score", 60)
+            mood_context = mood_transition_data.get("mood_context", {})
+
+            # Determine conversation emotion (same logic as non-streaming)
+            emotion_start = time.time()
+            conversation_emotion, emotion_reasoning = self.conversation_prompt_service.select_conversation_emotion_with_mood(
+                user_message=user_message,
+                conversation_history=conversation_history,
+                blended_mood_score=blended_mood,
+                mood_transition_data=mood_transition_data
+            )
+            emotion_time = (time.time() - emotion_start) * 1000
+            print(f"⏱️  [{correlation_id}] Emotion selection: {emotion_time:.0f}ms", flush=True)
+
+            # Yield context ready event
+            yield self._format_sse_event("context_ready", {
+                "correlation_id": correlation_id,
+                "recent_events_count": len(recent_events),
+                "conversation_emotion": conversation_emotion.value if conversation_emotion else None,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            # Construct prompt (same as non-streaming)
+            prompt_start = time.time()
+            base_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
+                character_backstory=selected_backstory.get("content", ""),
+                user_message=user_message,
+                conversation_emotion=conversation_emotion,
+                mood_transition_data=mood_transition_data,
+                conversation_history=conversation_history
+            )
+            base_prompt_size = len(base_prompt)
+
+            # Add simulation context to prompt
+            sim_context = self._build_simulation_context_prompt(
+                recent_events, global_state, content_metadata
+            )
+            sim_context_size = len(sim_context)
+            enhanced_prompt = base_prompt + sim_context
+
+            prompt_time = (time.time() - prompt_start) * 1000
+            prompt_length = len(enhanced_prompt)
+            print(f"⏱️  [{correlation_id}] Prompt construction: {prompt_time:.0f}ms", flush=True)
+            print(f"    - Base prompt: {base_prompt_size} chars | Sim context: {sim_context_size} chars | Total: {prompt_length} chars", flush=True)
+
+            # CRITICAL: Using AsyncOpenAI for true async streaming without blocking
+            # Chunks will be sent progressively as they arrive from OpenAI
+
+            # Stream OpenAI response with automatic prompt caching (Oct 2024 feature)
+            # Caching activates automatically for prompts >1024 tokens (~4000 chars)
+            # Best practice: Put ALL content in one system message for max cache hit
+            openai_start = time.time()
+            print(f"⏱️  [{correlation_id}] Initiating OpenAI stream request (auto-caching enabled)...", flush=True)
+
+            # Combine base_prompt + sim_context in single system message
+            # OpenAI caches the longest matching prefix automatically
+            # Since base_prompt (11k chars) is stable, it will be cached
+            system_prompt = base_prompt + sim_context
+
+            stream = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                max_tokens=400,
+                temperature=0.7,
+                stream=True  # Enable streaming
+            )
+            openai_init_time = (time.time() - openai_start) * 1000
+            print(f"⏱️  [{correlation_id}] OpenAI stream initialized: {openai_init_time:.0f}ms", flush=True)
+
+            # RAW STREAMING: Send chunks immediately as they arrive, no backend parsing
+            # Frontend will handle JSON filtering on-the-fly for maximum real-time performance
+            accumulated_response = ""  # Build complete response for final parsing
+
+            # IMMEDIATE STREAMING: Send every token as it arrives from OpenAI
+            # This eliminates all buffering to achieve true real-time streaming
+            chunk_count = 0
+            first_chunk_time = None
+            last_chunk_time = None
+
+            print(f"⏱️  [{correlation_id}] Waiting for first chunk from OpenAI...", flush=True)
+
+            async for chunk in stream:
+                if chunk.choices[0].delta.content is None:
+                    continue
+
+                if first_chunk_time is None:
+                    first_chunk_time = time.time()
+                    time_to_first_token = (first_chunk_time - start_time) * 1000
+                    print(f"⚡ [{correlation_id}] FIRST TOKEN RECEIVED: {time_to_first_token:.0f}ms from stream start", flush=True)
+
+                last_chunk_time = time.time()
+                chunk_text = chunk.choices[0].delta.content
+                accumulated_response += chunk_text
+                chunk_count += 1
+
+                # Yield IMMEDIATELY - no buffering, no delays
+                sse_event = self._format_sse_event("consciousness_chunk", {
+                    "correlation_id": correlation_id,
+                    "chunk": chunk_text,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+
+                if chunk_count == 1:
+                    print(f"⚡ [{correlation_id}] YIELDING FIRST CHUNK to frontend", flush=True)
+
+                yield sse_event
+
+                # Log first few chunks and periodically thereafter
+                if chunk_count <= 5 or chunk_count % 10 == 0:
+                    logger.info(f"[{correlation_id}] Chunk {chunk_count}: {len(chunk_text)} chars - '{chunk_text[:30]}'")
+
+            stream_duration = (last_chunk_time - first_chunk_time) if first_chunk_time and last_chunk_time else 0
+            logger.info(f"[{correlation_id}] Stream completed: {chunk_count} chunks, {len(accumulated_response)} chars, {stream_duration:.2f}s duration")
+
+            # Final parsing: Extract complete message and emotion from full JSON
+            try:
+                ai_response_json = json.loads(accumulated_response)
+                full_ai_response = ai_response_json.get("message", "").strip()
+                response_emotion = ai_response_json.get("emotion", conversation_emotion.value if conversation_emotion else "calm")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error(f"Failed to parse complete JSON: {e}, raw: {accumulated_response[:200]}")
+                # Fallback: manual extraction
+                if '"message"' in accumulated_response and '": "' in accumulated_response:
+                    try:
+                        msg_start = accumulated_response.find('"message": "') + 12
+                        msg_end = accumulated_response.find('",', msg_start)
+                        full_ai_response = accumulated_response[msg_start:msg_end] if msg_end != -1 else accumulated_response[msg_start:]
+                    except:
+                        full_ai_response = accumulated_response
+                else:
+                    full_ai_response = accumulated_response
+                response_emotion = conversation_emotion.value if conversation_emotion else "calm"
+
+            # Store messages in session state (same as non-streaming)
+            await self.session_state_service.add_conversation_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_type="assistant",
+                message_content=full_ai_response,
+                metadata={
+                    "conversation_emotion": response_emotion,
+                    "global_mood": blended_mood,
+                    "enhanced_mode": True,
+                    "correlation_id": correlation_id
+                }
+            )
+
+            # Track events mentioned (same as non-streaming)
+            await self._track_events_mentioned(simulation_context, user_id, conversation_id)
+
+            # Calculate performance metrics
+            total_duration = (time.time() - start_time) * 1000
+
+            # End timing context
+            if timing_context:
+                final_metrics = self.performance_monitor.end_timing_context(timing_context)
+            else:
+                final_metrics = {"total_duration_ms": total_duration}
+
+            # Yield final completion event with parsed message
+            yield self._format_sse_event("processing_complete", {
+                "correlation_id": correlation_id,
+                "response": full_ai_response,  # Already parsed message text only
+                "simulation_context": {
+                    "conversation_emotion": response_emotion,
+                    "global_mood": blended_mood,
+                    "recent_events_count": len(recent_events)
+                },
+                "performance_metrics": final_metrics,
+                "success": True,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Streaming response failed: {str(e)}")
+            yield self._format_sse_event("error", {
+                "correlation_id": correlation_id,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+    def _format_sse_event(self, event_type: str, data: Dict[str, Any]) -> str:
+        """Format data as Server-Sent Events (SSE) string."""
+        json_data = json.dumps(data)
+        return f"event: {event_type}\ndata: {json_data}\n\n"
 
     async def _track_events_mentioned(
         self,

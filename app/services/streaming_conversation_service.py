@@ -529,9 +529,7 @@ class StreamingConversationService:
         try:
             # Use enhanced service's exact context gathering logic
             from app.services.event_selection_service import EventSelectionService
-            from app.services.dynamic_content_selector import DynamicContentSelector
-            from app.services.mood_transition_analyzer import MoodTransitionAnalyzer
-            from app.services.state_influence_service import StateInfluenceService
+            from app.services.contextual_backstory_service import ContextualBackstoryService
             from app.services.simulation.state_manager import StateManagerService
 
             # Get recent events (same as enhanced service)
@@ -547,28 +545,24 @@ class StreamingConversationService:
             state_manager = StateManagerService()
             global_state = await state_manager.get_current_global_state()
 
-            # Select dynamic content (same as enhanced service)
-            content_selector = DynamicContentSelector()
-            selected_backstory = await content_selector.select_weighted_content(
-                content_type="backstory",
-                context={"user_message": user_message}
+            # Select backstory content using the correct service
+            from app.core.conversation_config import conversation_config
+            backstory_service = ContextualBackstoryService(conversation_config)
+            selected_backstory = await backstory_service.select_relevant_content(
+                user_message=user_message,
+                max_chars=int(conversation_config.MAX_BACKSTORY_CHARS * 0.6)
             )
 
             # Get content metadata (same as enhanced service)
             content_metadata = {
-                "selected_backstory_id": selected_backstory.get("id") if selected_backstory else None,
-                "content_selection_reasoning": selected_backstory.get("reasoning", "Default selection") if selected_backstory else "Default selection"
+                "content_types": selected_backstory.get("content_types", []),
+                "content_selection_reasoning": selected_backstory.get("selection_reasoning", "Default selection")
             }
 
-            # Analyze mood transition (same as enhanced service)
-            mood_analyzer = MoodTransitionAnalyzer()
-            mood_data = mood_analyzer.analyze_mood_transition(
-                current_conversation=[{"content": user_message, "role": "user"}],
-                global_state=global_state,
-                recent_events=recent_events
-            )
-            conversation_emotion = mood_data.get("primary_emotion")
-            mood_transition_data = mood_data
+            # Get mood data - emotion will be determined by state influence service
+            # which is called later in the prompt construction
+            conversation_emotion = None
+            mood_transition_data = {}
 
             return (
                 recent_events,

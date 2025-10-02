@@ -205,40 +205,46 @@ async def stream_conversation(
     Stream conversation response using Server-Sent Events (SSE) for optimized performance.
 
     Provides progressive response delivery to reduce perceived latency from ~6.4s to <500ms
-    for first meaningful content. Maintains compatibility with existing conversation API.
+    for first meaningful content. Uses enhanced service with stream=True for feature parity.
     """
     try:
         from fastapi.responses import StreamingResponse
-        from app.services.streaming_conversation_service import StreamingConversationService
+        from app.services.event_selection_service import EventSelectionService
 
         logger.info(f"Processing streaming conversation request for user {current_user.id}: {request.message[:100]}...")
 
-        # Handle conversation tracking with session_id
+        # Initialize services (same as normal /conversation endpoint)
+        enhanced_service = EnhancedConversationService()
+        event_service = EventSelectionService()
+
+        # Handle conversation tracking with session_id (same as normal endpoint)
         if request.session_id:
-            # Generate a UUID based on session and user for consistency
-            import hashlib
-            session_string = f"session_{request.session_id}_user_{current_user.id}"
-            # Create deterministic UUID from session string
-            hash_hex = hashlib.md5(session_string.encode()).hexdigest()
-            conversation_id = str(uuid.UUID(hash_hex))
+            conversation_id = f"session_{request.session_id}_user_{current_user.id}"
             logger.info(f"🔄 Using session-based conversation ID: {conversation_id}")
         else:
             conversation_id = request.conversation_id or str(uuid.uuid4())
             logger.info(f"🆕 Generated new conversation ID: {conversation_id}")
 
-        # Initialize streaming conversation service
-        streaming_service = StreamingConversationService()
+        # Get fresh events BEFORE streaming (same as normal endpoint)
+        logger.info("Getting fresh events for conversation context...")
+        fresh_events = await event_service.get_contextual_events(
+            user_id=str(current_user.id),
+            conversation_id=conversation_id,
+            user_message=request.message,
+            max_events=2  # Limit to 2 events to avoid overwhelming Clara
+        )
+        logger.info(f"Retrieved {len(fresh_events)} fresh events for conversation context")
 
-        # Stream the conversation response
-        response_stream = streaming_service.stream_conversation_response(
+        # Use enhanced service with stream=True for SSE streaming
+        logger.info("Generating streaming enhanced response with simulation context...")
+        response_stream = await enhanced_service.generate_enhanced_response(
             user_message=request.message,
             user_id=str(current_user.id),
             conversation_id=conversation_id,
-            session_id=request.session_id,
-            personality=request.personality,
-            target_vocabulary=[],  # Clara schema doesn't have target_vocabulary
-            user_preferences={},  # TODO: Get from session
-            db=db
+            conversation_history=None,  # Enhanced service handles via SessionStateService
+            personality=request.personality or "friendly_neutral",
+            fresh_events=fresh_events,
+            stream=True  # Enable SSE streaming
         )
 
         # Return SSE streaming response
@@ -248,6 +254,8 @@ async def stream_conversation(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Critical: Disable nginx/proxy buffering
+                "X-Content-Type-Options": "nosniff",  # Prevent browser MIME sniffing buffering
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control"
             }

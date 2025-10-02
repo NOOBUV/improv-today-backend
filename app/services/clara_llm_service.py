@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
-from openai import OpenAI
+from openai import AsyncOpenAI
 import asyncio
 from app.core.config import settings
 from app.services.conversation_prompt_service import EmotionType
@@ -34,7 +34,7 @@ class ClaraLLMService:
             logger.warning("No OpenAI API key found. Using fallback responses.")
         else:
             try:
-                self.client = OpenAI(api_key=settings.openai_api_key)
+                self.client = AsyncOpenAI(api_key=settings.openai_api_key)
                 logger.info("OpenAI client initialized successfully for Clara LLM service")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
@@ -82,29 +82,24 @@ class ClaraLLMService:
     
     async def _make_openai_call(self, prompt: str, max_tokens: int, temperature: float) -> Dict:
         """Make the actual OpenAI API call."""
-        
-        # Run OpenAI call in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        
-        def _call_openai():
-            return self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are Clara, a 22-year-old human having a natural conversation. Never respond like an AI assistant (avoid phrases like 'Sure, I can help with that'). You are NOT providing help or assistance - you are simply chatting as yourself. Respond authentically as Clara would in a casual conversation between friends, and always return valid JSON in the exact format requested."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={"type": "json_object"}
-            )
-        
-        response = await loop.run_in_executor(None, _call_openai)
+
+        # Use AsyncOpenAI for native async support
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are Clara, a 22-year-old human having a natural conversation. Never respond like an AI assistant (avoid phrases like 'Sure, I can help with that'). You are NOT providing help or assistance - you are simply chatting as yourself. Respond authentically as Clara would in a casual conversation between friends, and always return valid JSON in the exact format requested."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            response_format={"type": "json_object"}
+        )
         return response
     
     def _parse_clara_response(self, response) -> ClaraResponse:

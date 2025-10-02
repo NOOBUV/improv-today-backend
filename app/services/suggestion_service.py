@@ -10,6 +10,10 @@ class SuggestionService:
     """
     Service for generating vocabulary suggestions based on user input.
     MVP implementation uses simple keyword-based lookup.
+
+    NOTE: This is for improv-today's vocabulary learning feature, NOT for Clara.
+    Clara is being built in the same project but doesn't use vocabulary suggestions.
+    Do NOT integrate this into Clara's conversation flow.
     """
 
     def __init__(self):

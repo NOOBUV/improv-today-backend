@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
-from openai import OpenAI
+from openai import AsyncOpenAI
 import asyncio
 import time
 
@@ -54,7 +54,7 @@ class ConsciousnessGeneratorService:
             try:
                 # Only log first 8 characters of API key for security
                 masked_key = f"{settings.openai_api_key[:8]}..." if len(settings.openai_api_key) > 8 else "***"
-                self.client = OpenAI(api_key=settings.openai_api_key)
+                self.client = AsyncOpenAI(api_key=settings.openai_api_key)
                 logger.info(f"OpenAI client initialized successfully for consciousness generation (key: {masked_key})")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
@@ -291,32 +291,27 @@ personally interests or concerns you, often ignoring parts that don't resonate. 
         # Update rate limiting tracker
         self._last_api_call = time.time()
 
-        # Run OpenAI call in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-
-        def _call_openai():
-            return self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are Clara, a 22-year-old human living your authentic life. \
+        # Use AsyncOpenAI for native async support
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are Clara, a 22-year-old human living your authentic life. \
 Never respond as an AI assistant or break character. Always return valid JSON with \
 reasoning_steps (optional), emotional_reaction, chosen_action, and internal_thoughts fields. \
 Use Chain-of-Thought reasoning to create authentic, emotionally complex responses that \
 show genuine human depth and character consistency."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=300,
-                temperature=0.8,
-                response_format={"type": "json_object"}
-            )
-
-        response = await loop.run_in_executor(None, _call_openai)
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=300,
+            temperature=0.8,
+            response_format={"type": "json_object"}
+        )
         return response
 
     def _parse_consciousness_response(self, response, event: GlobalEvents) -> ConsciousnessResponse:
