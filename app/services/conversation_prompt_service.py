@@ -207,9 +207,21 @@ Based on BOTH your global mood and your mood in this specific conversation, gene
 6. Tell stories through concrete details, sensations, and raw emotions - not meta-analysis
 7. CRITICAL: You are having a casual conversation as a human friend, NOT providing assistance or help - avoid AI assistant language like "Sure, I can help with that" or "How can I assist you?"
 
+SPEECH DELIVERY MARKUP: Embed pauses and volume changes inline for natural speech:
+- Use [pause:0.3s] for brief pauses (0.1s - 1.0s)
+- Use [pause:0.6s] for thinking pauses
+- Use [pause:1.0s] for dramatic effect or emphasis
+- Use [volume:soft] for gentle, intimate moments
+- Use [volume:loud] for emphasis or excitement
+- Use [volume:normal] to reset volume
+Examples:
+- "Yeah... [pause:0.4s] that's exactly what I mean."
+- "Wait [pause:0.3s] really? [volume:loud] That's amazing!"
+- "[volume:soft] I don't know [pause:0.6s] it's complicated."
+
 Response format:
 {{
-    "message": "Your conversational response here",
+    "message": "Your conversational response with inline [pause:*] and [volume:*] markup",
     "emotion": "{conversation_emotion.value}"
 }}"""
 
@@ -455,9 +467,21 @@ Based on BOTH your global mood and your mood in this specific conversation, gene
 6. Tell stories through concrete details, sensations, and raw emotions - not meta-analysis
 7. CRITICAL: You are having a casual conversation as a human friend, NOT providing assistance or help - avoid AI assistant language like "Sure, I can help with that" or "How can I assist you?"
 
+SPEECH DELIVERY MARKUP: Embed pauses and volume changes inline for natural speech:
+- Use [pause:0.3s] for brief pauses (0.1s - 1.0s)
+- Use [pause:0.6s] for thinking pauses
+- Use [pause:1.0s] for dramatic effect or emphasis
+- Use [volume:soft] for gentle, intimate moments
+- Use [volume:loud] for emphasis or excitement
+- Use [volume:normal] to reset volume
+Examples:
+- "Yeah... [pause:0.4s] that's exactly what I mean."
+- "Wait [pause:0.3s] really? [volume:loud] That's amazing!"
+- "[volume:soft] I don't know [pause:0.6s] it's complicated."
+
 Response format:
 {{
-    "message": "Your conversational response here",
+    "message": "Your conversational response with inline [pause:*] and [volume:*] markup",
     "emotion": "{conversation_emotion.value}"
 }}"""
 
