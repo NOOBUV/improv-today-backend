@@ -9,6 +9,7 @@ from app.models.subscription import SubscriptionPlan, UserSubscription, PaymentR
 from app.models.user import User
 from app.services.stripe_service import StripeService
 from app.schemas.stripe_schemas import SubscriptionStatus
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -179,40 +180,52 @@ class SubscriptionManagementService:
                 .where(User.id == user_id)
             )
             user = result.scalar_one_or_none()
-            
+
             if not user:
                 return SubscriptionStatus(
                     is_active=False,
                     is_trial=False,
                     status="user_not_found"
                 )
-            
+
+            # Check if user is a superadmin - always return active status
+            if user.email and user.email in settings.superadmin_emails_list:
+                logger.info(f"Superadmin subscription status check for user {user.id} ({user.email})")
+                return SubscriptionStatus(
+                    is_active=True,
+                    is_trial=False,
+                    trial_ends_at=None,
+                    subscription_ends_at=None,
+                    plan_name="Superadmin",
+                    status="active"
+                )
+
             if not user.subscription:
                 return SubscriptionStatus(
                     is_active=False,
                     is_trial=False,
                     status="no_subscription"
                 )
-            
+
             subscription = user.subscription
             now = datetime.now(timezone.utc)
-            
+
             # Check if subscription is active
             is_active = subscription.status in ["active", "trialing"]
             is_trial = subscription.status == "trialing"
-            
+
             # Check trial expiration
             trial_expired = False
             if subscription.trial_end and now > subscription.trial_end:
                 trial_expired = True
                 is_trial = False
-            
+
             # Check subscription expiration
             subscription_expired = False
             if subscription.current_period_end and now > subscription.current_period_end:
                 subscription_expired = True
                 is_active = False
-            
+
             return SubscriptionStatus(
                 is_active=is_active and not subscription_expired,
                 is_trial=is_trial and not trial_expired,
@@ -221,7 +234,7 @@ class SubscriptionManagementService:
                 plan_name=subscription.plan.name if subscription.plan else None,
                 status=subscription.status
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to check subscription status for user {user_id}: {str(e)}")
             return SubscriptionStatus(

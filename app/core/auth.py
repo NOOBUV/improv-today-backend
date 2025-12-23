@@ -63,20 +63,26 @@ async def get_current_admin_user(
 ) -> dict:
     """Get current admin user with Auth0 role-based access control"""
     from app.auth.auth_utils import AuthUtils
-    
+
     # Use Auth0 validation
     auth_utils = AuthUtils()
     current_user = await auth_utils.verify_token(credentials)
-    
+
+    # Check if user is a superadmin first
+    user_email = current_user.get("email", "")
+    if user_email and user_email in settings.superadmin_emails_list:
+        # Grant admin access to superadmins
+        return current_user
+
     # Check for admin role in custom claims
     namespace = "https://improv-today.com/"
     roles = current_user.get(f"{namespace}roles", [])
-    
+
     # Require admin role for access
     if not roles or "admin" not in roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required - admin role not found in token"
         )
-    
+
     return current_user

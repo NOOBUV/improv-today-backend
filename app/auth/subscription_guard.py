@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.subscription_management_service import SubscriptionManagementService
@@ -33,31 +34,36 @@ class SubscriptionGuard:
     ) -> bool:
         """
         Verify if user has access to conversation features.
-        
+
         Args:
             user: The user to check
             db: Database session
-            
+
         Returns:
             bool: True if user has access, False otherwise
         """
         if not user:
             return False
-            
+
+        # Check if user is a superadmin - they always have access
+        if user.email and user.email in settings.superadmin_emails_list:
+            logger.info(f"Superadmin access granted for user {user.id} ({user.email})")
+            return True
+
         try:
             status = self.subscription_service.check_user_subscription_status(db, user.id)
-            
+
             # Allow access for active subscriptions or active trials
             has_access = status.is_active or status.is_trial
-            
+
             logger.info(
                 f"Conversation access check for user {user.id}: "
                 f"active={status.is_active}, trial={status.is_trial}, "
                 f"status={status.status}, access={has_access}"
             )
-            
+
             return has_access
-            
+
         except Exception as e:
             logger.error(f"Error checking subscription status for user {user.id}: {str(e)}")
             return False

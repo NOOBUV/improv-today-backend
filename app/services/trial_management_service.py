@@ -8,6 +8,7 @@ from sqlalchemy import select, and_
 from app.models.subscription import UserSubscription
 from app.models.user import User
 from app.services.subscription_management_service import SubscriptionManagementService
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -129,22 +130,43 @@ class TrialManagementService:
         return processed_count
     
     def get_trial_status(
-        self, 
-        db: Session, 
+        self,
+        db: Session,
         user_id: int
     ) -> dict:
         """
         Get detailed trial status for a user.
-        
+
         Args:
             db: Database session
             user_id: User ID to check
-            
+
         Returns:
             dict: Trial status information
         """
+        # First, get the user to check if they're a superadmin
+        result = db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+
+        # Check if user is a superadmin - always return active status
+        if user and user.email and user.email in settings.superadmin_emails_list:
+            logger.info(f"Superadmin trial status check for user {user.id} ({user.email})")
+            return {
+                "user_type": "superadmin",
+                "has_trial": False,
+                "trial_active": False,
+                "trial_expired": False,
+                "days_remaining": 0,
+                "trial_end": None,
+                "can_access_conversation": True,
+                "is_trial_active": False,
+                "has_subscription": True,
+                "subscription_status": "active",
+                "plan_name": "Superadmin"
+            }
+
         subscription = self.subscription_service.get_user_active_subscription(db, user_id)
-        
+
         if not subscription:
             # Check if user had any previous subscriptions
             result = db.execute(

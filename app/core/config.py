@@ -39,8 +39,17 @@ class Settings(BaseSettings):
     stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
     stripe_publishable_key: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-    
-    
+
+    # Superadmin Configuration
+    superadmin_emails: str = os.getenv("SUPERADMIN_EMAILS", "")
+
+    @property
+    def superadmin_emails_list(self) -> list[str]:
+        """Parse comma-separated superadmin emails into a list"""
+        if not self.superadmin_emails:
+            return []
+        return [email.strip() for email in self.superadmin_emails.split(",")]
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
