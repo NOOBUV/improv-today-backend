@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Celery Worker and Beat startup script for Improv Today simulation engine
+# Celery Worker and Beat startup script for Clara simulation engine
 
 echo "Starting Celery worker and beat scheduler for simulation engine..."
 

@@ -1,5 +1,5 @@
 """
-Celery configuration for Improv Today background tasks.
+Celery configuration for Clara background tasks.
 Handles the simulation engine and other async operations.
 """
 
@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Create Celery app instance
-celery_app = Celery("improv_today")
+celery_app = Celery("clara")
 
 # Redis configuration (using existing Redis from subscription system)
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6378/0")

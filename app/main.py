@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.middleware.subscription_middleware import SubscriptionMiddleware
 
 app = FastAPI(
-    title="Improv Today API",
+    title="Clara API",
     version="1.0.0",
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None if settings.is_production else "/redoc",
@@ -49,7 +49,7 @@ app.include_router(state.router, tags=["state"])
 
 @app.get("/")
 async def root():
-    return {"message": "Improv Today API"}
+    return {"message": "Clara API"}
 
 @app.get("/health")
 async def health_check():
@@ -60,7 +60,7 @@ async def health_check():
 async def startup_event():
     """Initialize services on application startup"""
     logger = logging.getLogger("app.startup")
-    logger.info("Initializing ImprovToday backend services...")
+    logger.info("Initializing Clara backend services...")
     
     # Import models to ensure they're registered with Base
     from app.models import user, clara_state
@@ -82,14 +82,14 @@ async def startup_event():
     logger.info("HTTP API endpoints available:")
     logger.info("  - /api/clara - Main conversation endpoint")
 
-    logger.info("ImprovToday backend startup complete")
+    logger.info("Clara backend startup complete")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup services on application shutdown"""
     logger = logging.getLogger("app.shutdown")
-    logger.info("Shutting down ImprovToday backend services...")
+    logger.info("Shutting down Clara backend services...")
     
     # Cleanup would go here if needed
-    logger.info("ImprovToday backend shutdown complete")
+    logger.info("Clara backend shutdown complete")

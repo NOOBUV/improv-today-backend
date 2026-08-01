@@ -170,62 +170,6 @@ Be encouraging and respond authentically to what they say.
             print(f"OpenAI Request Error: {str(e)}")
             return self._get_smart_fallback_response(message)
     
-    async def generate_welcome_message(self, personality: str = "friendly_neutral") -> str:
-        """Generate personalized welcome message for first-time users"""
-        
-        if not settings.openai_api_key:
-            return self._get_fallback_welcome_message(personality)
-            
-        try:
-            personality_prompts = {
-                "sassy_english": """You are a witty, sassy English conversation partner with a charming British accent. Generate a warm welcome message that immediately starts conversation without any buttons or topic selection. Be playful and cheeky but welcoming.""",
-                
-                "blunt_american": """You are a direct, no-nonsense American conversation partner. Generate a straightforward welcome message that gets right to conversation without any topic selection. Be direct but friendly.""",
-                
-                "friendly_neutral": """You are a warm, encouraging conversation partner. Generate a welcoming message that immediately starts natural conversation without any topic selection. Be genuinely interested and supportive."""
-            }
-            
-            base_prompt = personality_prompts.get(personality, personality_prompts["friendly_neutral"])
-            
-            system_prompt = f"""{base_prompt}
-
-Generate a welcome message that:
-1. Welcomes them to ImprovToday
-2. Asks for their name to address them personally
-3. Asks about their day or something they did today
-4. Starts conversation naturally without topic selection
-5. Keep it conversational and under 3 sentences
-6. Make it feel like talking to a friend
-
-Example structure: Welcome message + name question + day/activity question"""
-            
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Create a welcoming first-time user message"}
-                ],
-                max_tokens=100,
-                temperature=0.8
-            )
-            
-            return response.choices[0].message.content.strip()
-                
-        except Exception as e:
-            print(f"OpenAI Welcome Message Error: {str(e)}")
-            return self._get_fallback_welcome_message(personality)
-    
-    def _get_fallback_welcome_message(self, personality: str) -> str:
-        """Fallback welcome messages when OpenAI is unavailable"""
-        messages = {
-            "sassy_english": "Well hello there! Welcome to ImprovToday, darling! What name shall I call you, and do tell me - how's your day been? Anything exciting happen that you'd fancy chatting about?",
-            
-            "blunt_american": "Hey there, welcome to ImprovToday! Let's cut to the chase - what should I call you, and how was your day? What's been going on?",
-            
-            "friendly_neutral": "Welcome to ImprovToday! I'm so glad you're here. What name should I address you with? And how has your day been - did you do anything interesting today that you'd like to share?"
-        }
-        
-        return messages.get(personality, messages["friendly_neutral"])
 
     def _get_smart_fallback_response(self, message: str) -> str:
         """Smarter fallback responses based on message content"""
