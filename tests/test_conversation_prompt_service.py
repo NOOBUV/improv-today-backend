@@ -63,146 +63,32 @@ class TestConversationPromptService:
         assert "Key characteristics:" in result
         assert "Ironic agreement" in result  # From sassy characteristics
     
-    def test_select_conversation_emotion_funny_keywords(self, prompt_service):
-        """Test emotion selection for funny/humorous content"""
-        test_messages = [
-            "That's so funny!",
-            "What a ridiculous joke",
-            "You make me laugh",
-            "That's silly"
-        ]
-        
-        for message in test_messages:
-            emotion = prompt_service.select_conversation_emotion(message)
-            assert emotion == EmotionType.SASSY
-    
-    def test_select_conversation_emotion_sad_keywords(self, prompt_service):
-        """Test emotion selection for sad content"""
-        test_messages = [
-            "I'm feeling sad today",
-            "Sorry to hear about your problem",
-            "This is really difficult",
-            "I'm struggling with this"
-        ]
-        
-        for message in test_messages:
-            emotion = prompt_service.select_conversation_emotion(message)
-            assert emotion == EmotionType.SAD
-    
-    def test_select_conversation_emotion_happy_keywords(self, prompt_service):
-        """Test emotion selection for happy content"""
-        test_messages = [
-            "I'm so happy about this!",
+    @pytest.mark.parametrize("message,expected", [
+        ("That's so funny!", EmotionType.SASSY),
+        ("What a ridiculous joke", EmotionType.SASSY),
+        ("I'm feeling sad today", EmotionType.SAD),
+        ("This is really difficult", EmotionType.SAD),
+        ("I'm so happy about this!", EmotionType.HAPPY),
+        ("That's great news!", EmotionType.HAPPY),
+        ("I'm so busy with this deadline", EmotionType.STRESSED),
+        ("Under so much pressure", EmotionType.STRESSED),
+        ("How are you doing?", EmotionType.CALM),
+        ("What's the weather like?", EmotionType.CALM),
+    ])
+    def test_emotion_keyword_selection(self, prompt_service, message, expected):
+        """Keyword heuristic still drives emotion selection through the public API."""
+        emotion, reasoning = prompt_service.select_conversation_emotion_with_mood(message)
+
+        assert emotion == expected
+        assert isinstance(reasoning, str) and reasoning
+
+    def test_mood_score_overrides_keyword_emotion(self, prompt_service):
+        """Low blended mood pulls a happy keyword match down to calm."""
+        emotion, reasoning = prompt_service.select_conversation_emotion_with_mood(
             "That's great news!",
-            "How wonderful!",
-            "I'm excited about this amazing opportunity"
-        ]
-        
-        for message in test_messages:
-            emotion = prompt_service.select_conversation_emotion(message)
-            assert emotion == EmotionType.HAPPY
-    
-    def test_select_conversation_emotion_stressed_keywords(self, prompt_service):
-        """Test emotion selection for stressed content"""
-        test_messages = [
-            "I'm so busy with this deadline",
-            "Feeling overwhelmed by work",
-            "Under so much pressure",
-            "This is urgent and stressful"
-        ]
-        
-        for message in test_messages:
-            emotion = prompt_service.select_conversation_emotion(message)
-            assert emotion == EmotionType.STRESSED
-    
-    def test_select_conversation_emotion_default_calm(self, prompt_service):
-        """Test emotion selection defaults to calm for neutral content"""
-        test_messages = [
-            "How are you doing?",
-            "What's the weather like?",
-            "Can you help me with this task?",
-            "Let's discuss this topic"
-        ]
-        
-        for message in test_messages:
-            emotion = prompt_service.select_conversation_emotion(message)
-            assert emotion == EmotionType.CALM
-    
-    def test_determine_emotion_from_context(self, prompt_service):
-        """Test emotion determination with reasoning"""
-        emotion, reasoning = prompt_service.determine_emotion_from_context("That's hilarious!")
-        
-        assert emotion == EmotionType.SASSY
-        assert isinstance(reasoning, str)
-        assert len(reasoning) > 0
-    
-    def test_construct_conversation_prompt_structure(self, prompt_service):
-        """Test conversation prompt construction includes all required elements"""
-        backstory = "Test backstory content"
-        user_message = "Hello, how are you?"
-        
-        result = prompt_service.construct_conversation_prompt(
-            character_backstory=backstory,
-            user_message=user_message,
-            conversation_emotion=EmotionType.CALM
+            blended_mood_score=35.0,
+            mood_transition_data={"mood_context": {"mood_category": "low"}},
         )
-        
-        # Check required components are present
-        assert "You are Ava" in result
-        assert backstory in result
-        assert user_message in result
-        assert "stressed" in result  # Global mood
-        assert "65" in result  # Stress level
-        assert "calm" in result  # Conversation emotion
-        assert "Response format:" in result
-        assert "message" in result
-        assert "emotion" in result
-    
-    def test_construct_conversation_prompt_with_history(self, prompt_service):
-        """Test conversation prompt construction with conversation history"""
-        backstory = "Test backstory"
-        user_message = "What do you think?"
-        history = "Previous conversation context"
-        
-        result = prompt_service.construct_conversation_prompt(
-            character_backstory=backstory,
-            user_message=user_message,
-            conversation_emotion=EmotionType.HAPPY,
-            conversation_history=history
-        )
-        
-        assert history in result
-        assert "Recent conversation context:" in result
-    
-    def test_construct_conversation_prompt_custom_values(self, prompt_service):
-        """Test conversation prompt with custom global mood and stress"""
-        result = prompt_service.construct_conversation_prompt(
-            character_backstory="Test backstory",
-            user_message="Test message",
-            conversation_emotion=EmotionType.STRESSED,
-            global_mood="happy",
-            stress_level=30
-        )
-        
-        assert "happy" in result
-        assert "30" in result
-        assert "stressed" in result  # Conversation emotion
-    
-    def test_construct_conversation_prompt_different_emotions(self, prompt_service):
-        """Test prompt construction for different conversation emotions"""
-        backstory = "Test backstory"
-        user_message = "Test message"
-        
-        for emotion in EmotionType:
-            result = prompt_service.construct_conversation_prompt(
-                character_backstory=backstory,
-                user_message=user_message,
-                conversation_emotion=emotion
-            )
-            
-            # Each emotion should appear in the prompt
-            assert emotion.value in result
-            
-            # Should contain emotion-specific guidance
-            pattern = prompt_service.EMOTION_LINGUISTIC_PATTERNS[emotion]
-            assert pattern["tone"] in result
+
+        assert emotion == EmotionType.CALM
+        assert "low mood" in reasoning

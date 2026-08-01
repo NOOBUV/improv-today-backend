@@ -418,11 +418,10 @@ class EnhancedConversationService:
                     user_message=user_message,
                     conversation_emotion=conversation_emotion,
                     mood_transition_data=mood_transition_data,
-                    conversation_history=conversation_history
-                )
-
-                enhanced_prompt += self._build_simulation_context_prompt(
-                    recent_events, global_state, content_metadata
+                    conversation_history=conversation_history,
+                    recent_events=recent_events,
+                    global_state=global_state,
+                    content_metadata=content_metadata
                 )
 
                 s.meta(
@@ -551,26 +550,19 @@ class EnhancedConversationService:
 
             # Construct prompt (same as non-streaming)
             prompt_start = time.time()
-            base_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
+            system_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
                 character_backstory=selected_backstory.get("content", ""),
                 user_message=user_message,
                 conversation_emotion=conversation_emotion,
                 mood_transition_data=mood_transition_data,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                recent_events=recent_events,
+                global_state=global_state,
+                content_metadata=content_metadata
             )
-            base_prompt_size = len(base_prompt)
-
-            # Add simulation context to prompt
-            sim_context = self._build_simulation_context_prompt(
-                recent_events, global_state, content_metadata
-            )
-            sim_context_size = len(sim_context)
-            enhanced_prompt = base_prompt + sim_context
 
             prompt_time = (time.time() - prompt_start) * 1000
-            prompt_length = len(enhanced_prompt)
-            print(f"⏱️  [{correlation_id}] Prompt construction: {prompt_time:.0f}ms", flush=True)
-            print(f"    - Base prompt: {base_prompt_size} chars | Sim context: {sim_context_size} chars | Total: {prompt_length} chars", flush=True)
+            print(f"⏱️  [{correlation_id}] Prompt construction: {prompt_time:.0f}ms ({len(system_prompt)} chars)", flush=True)
 
             # CRITICAL: Using AsyncOpenAI for true async streaming without blocking
             # Chunks will be sent progressively as they arrive from OpenAI
@@ -580,11 +572,6 @@ class EnhancedConversationService:
             # Best practice: Put ALL content in one system message for max cache hit
             openai_start = time.time()
             print(f"⏱️  [{correlation_id}] Initiating OpenAI stream request (auto-caching enabled)...", flush=True)
-
-            # Combine base_prompt + sim_context in single system message
-            # OpenAI caches the longest matching prefix automatically
-            # Since base_prompt (11k chars) is stable, it will be cached
-            system_prompt = base_prompt + sim_context
 
             stream = await self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -743,75 +730,6 @@ class EnhancedConversationService:
 
         except Exception as e:
             logger.warning(f"Failed to track events mentioned: {str(e)}")
-
-    def _build_simulation_context_prompt(
-        self,
-        recent_events: List[Dict[str, Any]],
-        global_state: Dict[str, Any],
-        content_metadata: Dict[str, Any] = None
-    ) -> str:
-        """Build simulation context section with intelligent event prioritization."""
-
-        if not recent_events and not global_state:
-            return ""
-
-        context_parts = []
-
-        if recent_events:
-            # Use content selection strategy to inform how events are presented
-            strategy = content_metadata.get("strategy", "") if content_metadata else ""
-
-            if "current_day" in strategy.lower():
-                context_parts.append("\n\nTODAY'S EVENTS (prioritized for current day discussion):")
-            elif "specific_person" in strategy.lower():
-                context_parts.append("\n\nRELEVANT RECENT INTERACTIONS:")
-            elif "recent_life" in strategy.lower():
-                context_parts.append("\n\nRECENT LIFE HIGHLIGHTS:")
-            else:
-                context_parts.append("\n\nRECENT LIFE EVENTS:")
-
-            for event in recent_events:  # Use all intelligently selected events
-                hours_ago = event.get("hours_ago", 0)
-                if hours_ago < self.config.RECENT_EVENTS_HOURS_BACK:
-                    # More detailed time formatting for better conversation context
-                    if hours_ago < 1:
-                        time_str = "just now"
-                    elif hours_ago < 2:
-                        time_str = f"{int(hours_ago * 60)} minutes ago"
-                    elif hours_ago < 24:
-                        time_str = f"{int(hours_ago)} hours ago"
-                    elif hours_ago < 48:
-                        time_str = "yesterday"
-                    else:
-                        days_ago = int(hours_ago / 24)
-                        time_str = f"{days_ago} days ago"
-
-                    # Include intensity information for better context
-                    intensity = event.get("intensity", 0)
-                    summary = event.get("summary", '')
-
-                    if intensity >= 7:
-                        context_parts.append(f"- {summary} ({time_str}) [significant experience]")
-                    else:
-                        context_parts.append(f"- {summary} ({time_str})")
-
-        if global_state:
-            mood = global_state.get("mood", {}).get("numeric_value", 60)
-            stress = global_state.get("stress", {}).get("numeric_value", 50)
-            energy = global_state.get("energy", {}).get("numeric_value", 70)
-
-            context_parts.append(f"\n\nCURRENT STATE:")
-            context_parts.append(f"- Mood: {mood}/100, Stress: {stress}/100, Energy: {energy}/100")
-
-        # Adaptive instruction based on content selection
-        if content_metadata and "specific_person" in content_metadata.get("strategy", "").lower():
-            context_parts.append("\n\nFocus on the relevant interactions and experiences with the people mentioned. Share details naturally as they relate to the conversation.")
-        elif content_metadata and "current_day" in content_metadata.get("strategy", "").lower():
-            context_parts.append("\n\nShare how today has been going, referencing these recent experiences authentically. Don't feel obligated to mention everything - pick what feels natural to share.")
-        else:
-            context_parts.append("\n\nWeave these recent experiences into the conversation naturally when relevant. Focus on what genuinely connects to what the user is asking about.")
-
-        return "".join(context_parts)
 
     def _analyze_message_sentiment(self, user_message: str) -> Dict[str, Any]:
         """
