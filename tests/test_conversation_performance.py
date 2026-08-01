@@ -151,9 +151,7 @@ class TestEnhancedConversationServicePerformance:
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
-            'mood_transition_analyzer': Mock(),
             'simple_openai_service': Mock(),
-            'dynamic_content_selector': Mock(),
             'session_state_service': Mock(),
             'event_selection_service': Mock(),
             'openai_client': Mock()
@@ -168,9 +166,7 @@ class TestEnhancedConversationServicePerformance:
             ConversationPromptService=Mock(return_value=mock_dependencies['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=mock_dependencies['state_influence_service']),
             StateManagerService=Mock(return_value=mock_dependencies['state_manager_service']),
-            MoodTransitionAnalyzer=Mock(return_value=mock_dependencies['mood_transition_analyzer']),
             SimpleOpenAIService=Mock(return_value=mock_dependencies['simple_openai_service']),
-            DynamicContentSelector=Mock(return_value=mock_dependencies['dynamic_content_selector']),
             SessionStateService=Mock(return_value=mock_dependencies['session_state_service']),
             EventSelectionService=Mock(return_value=mock_dependencies['event_selection_service']),
             AsyncOpenAI=Mock(return_value=mock_dependencies['openai_client'])

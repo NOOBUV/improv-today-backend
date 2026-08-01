@@ -282,69 +282,6 @@ class TestEnhancedConversationService:
         assert simulation_context["conversation_emotion"] == "excited"
 
     @pytest.mark.asyncio
-    async def test_word_usage_evaluation(self, service):
-        """Test word usage evaluation functionality."""
-        enhanced_service, mocks = service
-
-        # Setup basic context
-        mocks['state_manager_service'].get_current_global_state.return_value = {}
-        mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
-            "content": "Content",
-            "content_types": [],
-            "char_count": 100,
-            "estimated_tokens": 25
-        }
-        mocks['state_influence_service'].build_conversation_context.return_value = {}
-
-        # Setup OpenAI mock
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "That's a sophisticated approach!"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
-            Mock(value="neutral"), "Neutral"
-        )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
-
-        result = await enhanced_service.generate_enhanced_response(
-            user_message="I used sophisticated methods to solve the problem",
-            user_id="user123",
-            conversation_id="conv456",
-            suggested_word="sophisticated"
-        )
-
-        assert result["word_usage_status"].value == "used_correctly"
-        assert result["usage_correctness_feedback"] is None
-
-    @pytest.mark.asyncio
-    async def test_context_summary_functionality(self, service):
-        """Test get_context_summary functionality."""
-        enhanced_service, mocks = service
-
-        # Setup mocks for context summary
-        mocks['state_influence_service'].get_state_influence_summary = AsyncMock(return_value={
-            "primary_influences": ["mood (85/100)"],
-            "overall_state_impact": "significant"
-        })
-        mocks['state_manager_service'].get_current_global_state.return_value = {
-            "mood": {"numeric_value": 85}
-        }
-        mocks['contextual_backstory_service'].get_cache_status.return_value = {
-            "cached_content_types": ["character_gist"],
-            "cache_size": 1
-        }
-
-        result = await enhanced_service.get_context_summary("user123", "conv456")
-
-        assert "state_influence" in result
-        assert "global_state_available" in result
-        assert "backstory_cache" in result
-        assert "config" in result
-        assert result["global_state_available"] == True
-
-    @pytest.mark.asyncio
     async def test_error_recovery(self, service):
         """Test error recovery and graceful degradation."""
         enhanced_service, mocks = service
@@ -452,9 +389,7 @@ class TestAwaitRegression:
                     "energy": {"numeric_value": 60},
                 })
             ),
-            'mood_transition_analyzer': Mock(),
             'simple_openai_service': Mock(generate_coaching_response=AsyncMock()),
-            'dynamic_content_selector': Mock(),
             'session_state_service': Mock(
                 add_conversation_message=AsyncMock(),
                 get_conversation_history=AsyncMock(return_value=[]),
@@ -485,9 +420,7 @@ class TestAwaitRegression:
             ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=deps['state_influence_service']),
             StateManagerService=Mock(return_value=deps['state_manager_service']),
-            MoodTransitionAnalyzer=Mock(return_value=deps['mood_transition_analyzer']),
             SimpleOpenAIService=Mock(return_value=deps['simple_openai_service']),
-            DynamicContentSelector=Mock(return_value=deps['dynamic_content_selector']),
             SessionStateService=Mock(return_value=deps['session_state_service']),
             EventSelectionService=Mock(return_value=deps['event_selection_service']),
             AsyncOpenAI=Mock(return_value=openai_client),

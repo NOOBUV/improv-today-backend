@@ -16,9 +16,7 @@ from app.services.contextual_backstory_service import ContextualBackstoryService
 from app.services.conversation_prompt_service import ConversationPromptService, EmotionType
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
 from app.services.simulation.state_manager import StateManagerService
-from app.services.mood_transition_analyzer import MoodTransitionAnalyzer
-from app.services.simple_openai import SimpleOpenAIService, OpenAICoachingResponse, WordUsageStatus
-from app.services.dynamic_content_selector import DynamicContentSelector
+from app.services.simple_openai import SimpleOpenAIService
 from app.services.session_state_service import SessionStateService
 from app.services.event_selection_service import EventSelectionService
 from app.core.config import settings
@@ -256,14 +254,6 @@ class ConversationPerformanceMonitor:
             "sub_operations_count": len(sub_operations)
         })
 
-    def generate_performance_report(self, correlation_id: str) -> Dict[str, Any]:
-        """Generate performance report for analysis (placeholder for future implementation)."""
-        return {
-            "correlation_id": correlation_id,
-            "report_generated_at": datetime.now(timezone.utc).isoformat(),
-            "note": "Performance reporting dashboard to be implemented in future story"
-        }
-
 
 class EnhancedConversationService:
     """
@@ -283,9 +273,7 @@ class EnhancedConversationService:
         self.conversation_prompt_service = ConversationPromptService()
         self.state_influence_service = StateInfluenceService()
         self.state_manager_service = StateManagerService()
-        self.mood_transition_analyzer = MoodTransitionAnalyzer()
         self.simple_openai_service = SimpleOpenAIService()
-        self.dynamic_content_selector = DynamicContentSelector()
         self.session_state_service = SessionStateService()
         self.event_selection_service = EventSelectionService()
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
@@ -298,8 +286,6 @@ class EnhancedConversationService:
         conversation_id: str,
         conversation_history: Optional[str] = None,
         personality: str = "friendly_neutral",
-        target_vocabulary: Optional[List[Dict]] = None,
-        suggested_word: Optional[str] = None,
         user_preferences: Optional[Dict[str, Any]] = None,
         fresh_events: Optional[List[Dict[str, Any]]] = None,
         stream: bool = False
@@ -314,8 +300,6 @@ class EnhancedConversationService:
             conversation_id: Conversation session identifier
             conversation_history: Existing conversation context
             personality: AI personality style
-            target_vocabulary: Target vocabulary words
-            suggested_word: Previously suggested word to evaluate
             user_preferences: User-specific preferences
             fresh_events: Pre-selected fresh events to avoid repetition
             stream: If True, returns AsyncGenerator for SSE streaming; if False, returns Dict
@@ -406,7 +390,6 @@ class EnhancedConversationService:
                             simulation_context=simulation_context,
                             conversation_history=conversation_history,
                             personality=personality,
-                            suggested_word=suggested_word,
                             timing_context=timing_context,
                             correlation_id=correlation_id
                         )
@@ -417,7 +400,6 @@ class EnhancedConversationService:
                             simulation_context=simulation_context,
                             conversation_history=conversation_history,
                             personality=personality,
-                            suggested_word=suggested_word,
                             timing_context=timing_context
                         )
 
@@ -479,9 +461,7 @@ class EnhancedConversationService:
             fallback_response = await self.simple_openai_service.generate_coaching_response(
                 message=user_message,
                 conversation_history=conversation_history or "",
-                personality=personality,
-                target_vocabulary=target_vocabulary or [],
-                suggested_word=suggested_word
+                personality=personality
             )
 
             self.performance_monitor.end_sub_operation(
@@ -501,8 +481,6 @@ class EnhancedConversationService:
             result = {
                 "ai_response": fallback_response.ai_response,
                 "corrected_transcript": fallback_response.corrected_transcript,
-                "word_usage_status": fallback_response.word_usage_status,
-                "usage_correctness_feedback": fallback_response.usage_correctness_feedback,
                 "simulation_context": simulation_context,
                 "selected_backstory_types": [],
                 "fallback_mode": True,
@@ -663,90 +641,12 @@ class EnhancedConversationService:
             logger.error(f"Error gathering simulation context: {str(e)}")
             return {}
 
-    async def _gather_simulation_context(
-        self,
-        user_message: str,
-        user_id: str,
-        conversation_id: str,
-        user_preferences: Optional[Dict[str, Any]] = None,
-        fresh_events: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
-        """Gather all simulation context for conversation enhancement."""
-
-        context = {}
-
-        try:
-            # Get current global state
-            global_state = await self.state_manager_service.get_current_global_state()
-            context["global_state"] = global_state
-            logger.debug(f"Retrieved global state: {len(global_state)} traits")
-
-            # Use provided fresh events or fetch new ones if not provided
-            # This prevents Clara from repeating the same events to the same user
-            if fresh_events is not None:
-                logger.info(f"Using pre-selected fresh events: {len(fresh_events)} events")
-                # Use provided fresh events (already filtered for this user)
-                fresh_events_data = fresh_events
-            else:
-                logger.info("Fetching fresh events from event selection service")
-                # Fetch fresh, contextually relevant events
-                fresh_events_data = await self.event_selection_service.get_contextual_events(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    user_message=user_message,
-                    max_events=self.config.MAX_EVENTS_COUNT
-                )
-
-            # Convert fresh events back to format expected by rest of system
-            context["recent_events"] = [event.get("original_event", event) for event in fresh_events_data]
-            context["content_selection_metadata"] = {
-                "strategy": "fresh_events_rotation",
-                "entities_found": [],
-                "total_analyzed": len(fresh_events_data),
-                "selected_count": len(fresh_events_data),
-                "fresh_events_used": [event.get("id") for event in fresh_events_data]
-            }
-
-            logger.info(f"Fresh events selection: {len(fresh_events_data)} events selected")
-            logger.debug(f"Selected fresh events: {[event.get('id') for event in fresh_events_data]}")
-
-            # Select relevant backstory content (reduced weight since we now prioritize recent events)
-            backstory_context = await self.contextual_backstory_service.select_relevant_content(
-                user_message=user_message,
-                max_chars=int(self.config.MAX_BACKSTORY_CHARS * 0.6)  # Reduce backstory to make room for events
-            )
-            context["selected_backstory"] = backstory_context
-            logger.debug(f"Selected backstory: {backstory_context['char_count']} chars, types: {backstory_context['content_types']}")
-
-            # Analyze conversation sentiment for mood transitions (enhanced with complexity detection)
-            conversation_sentiment_analysis = self._analyze_message_sentiment(user_message)
-            conversation_sentiment_score = conversation_sentiment_analysis.get("sentiment_score", 0.0)
-
-            # Build conversation context with state influence including mood transitions
-            conversation_context = await self.state_influence_service.build_conversation_context(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                scenario=ConversationScenario.CASUAL_CHAT,
-                user_preferences=user_preferences,
-                conversation_sentiment=conversation_sentiment_score,
-                recent_events=context["recent_events"]
-            )
-            context["conversation_influence"] = conversation_context
-            logger.debug(f"Built conversation context with {len(conversation_context)} influence factors")
-
-            return context
-
-        except Exception as e:
-            logger.error(f"Error gathering simulation context: {str(e)}")
-            return {}
-
     async def _generate_context_aware_response_with_monitoring(
         self,
         user_message: str,
         simulation_context: Dict[str, Any],
         conversation_history: Optional[str] = None,
         personality: str = "friendly_neutral",
-        suggested_word: Optional[str] = None,
         timing_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Generate context-aware response with detailed OpenAI API monitoring."""
@@ -858,28 +758,16 @@ class EnhancedConversationService:
                 response_emotion = conversation_emotion.value
                 logger.warning(f"Failed to parse JSON response, using raw content: {ai_response_raw[:100]}...")
 
-            # Handle word usage evaluation
-            word_usage_status = WordUsageStatus.NOT_USED
-            usage_feedback = None
-
-            if suggested_word:
-                word_usage_status, usage_feedback = self._evaluate_word_usage(
-                    user_message, suggested_word, ai_response
-                )
-
             if timing_context:
                 self.performance_monitor.end_sub_operation(
                     timing_context, "response_parsing", parsing_context,
                     json_parsed=ai_response != ai_response_raw,
-                    word_evaluation=suggested_word is not None,
                     final_response_length=len(ai_response)
                 )
 
             return {
                 "ai_response": ai_response,
                 "corrected_transcript": user_message,
-                "word_usage_status": word_usage_status,
-                "usage_correctness_feedback": usage_feedback,
                 "simulation_context": {
                     "recent_events_count": len(recent_events),
                     "global_mood": mood_context.get("current_mood", 60),
@@ -904,7 +792,6 @@ class EnhancedConversationService:
         simulation_context: Dict[str, Any],
         conversation_history: Optional[str] = None,
         personality: str = "friendly_neutral",
-        suggested_word: Optional[str] = None,
         timing_context: Optional[Dict[str, Any]] = None,
         correlation_id: str = None
     ) -> AsyncGenerator[str, None]:
@@ -1153,107 +1040,6 @@ class EnhancedConversationService:
         except Exception as e:
             logger.warning(f"Failed to track events mentioned: {str(e)}")
 
-    async def _generate_context_aware_response(
-        self,
-        user_message: str,
-        simulation_context: Dict[str, Any],
-        conversation_history: Optional[str] = None,
-        personality: str = "friendly_neutral",
-        suggested_word: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Generate response using enhanced context."""
-
-        try:
-            # Extract context components
-            global_state = simulation_context.get("global_state", {})
-            recent_events = simulation_context.get("recent_events", [])
-            selected_backstory = simulation_context.get("selected_backstory", {})
-            conversation_influence = simulation_context.get("conversation_influence", {})
-            content_metadata = simulation_context.get("content_selection_metadata", {})
-
-            # Extract mood transition data for emotion selection
-            mood_transition_data = conversation_influence.get("mood_transition", {})
-            blended_mood = mood_transition_data.get("blended_mood_score", 60)
-            mood_context = mood_transition_data.get("mood_context", {})
-
-            logger.debug(f"Using intelligent content selection: {content_metadata.get('strategy', 'unknown')}")
-
-            # Determine conversation emotion using mood-aware selection
-            conversation_emotion, emotion_reasoning = self.conversation_prompt_service.select_conversation_emotion_with_mood(
-                user_message=user_message,
-                conversation_history=conversation_history,
-                blended_mood_score=blended_mood,
-                mood_transition_data=mood_transition_data
-            )
-
-            # Construct enhanced prompt using ConversationPromptService with mood transition data
-            enhanced_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
-                character_backstory=selected_backstory.get("content", ""),
-                user_message=user_message,
-                conversation_emotion=conversation_emotion,
-                mood_transition_data=mood_transition_data,
-                conversation_history=conversation_history
-            )
-
-            # Add simulation context to the prompt with intelligent prioritization
-            enhanced_prompt += self._build_simulation_context_prompt(
-                recent_events, global_state, content_metadata
-            )
-
-            # Call OpenAI with enhanced prompt
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": enhanced_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
-
-            ai_response_raw = response.choices[0].message.content
-
-            # Parse JSON response from OpenAI
-            try:
-                ai_response_json = json.loads(ai_response_raw)
-                ai_response = ai_response_json.get("message", ai_response_raw)
-                response_emotion = ai_response_json.get("emotion", conversation_emotion.value)
-            except (json.JSONDecodeError, TypeError):
-                # Fallback if JSON parsing fails
-                ai_response = ai_response_raw
-                response_emotion = conversation_emotion.value
-                logger.warning(f"Failed to parse JSON response, using raw content: {ai_response_raw[:100]}...")
-
-            # Handle word usage evaluation if suggested word provided
-            word_usage_status = WordUsageStatus.NOT_USED
-            usage_feedback = None
-
-            if suggested_word:
-                word_usage_status, usage_feedback = self._evaluate_word_usage(
-                    user_message, suggested_word, ai_response
-                )
-
-            return {
-                "ai_response": ai_response,
-                "corrected_transcript": user_message,  # TODO: Add transcript correction
-                "word_usage_status": word_usage_status,
-                "usage_correctness_feedback": usage_feedback,
-                "simulation_context": {
-                    "recent_events_count": len(recent_events),
-                    "global_mood": mood_context.get("current_mood", 60),
-                    "stress_level": mood_context.get("stress_level", 50),
-                    "selected_content_types": selected_backstory.get("content_types", []),
-                    "conversation_emotion": response_emotion,
-                    "emotion_reasoning": emotion_reasoning
-                },
-                "selected_backstory_types": selected_backstory.get("content_types", []),
-                "fallback_mode": False
-            }
-
-        except Exception as e:
-            logger.error(f"Error generating context-aware response: {str(e)}")
-            raise
-
     def _build_simulation_context_prompt(
         self,
         recent_events: List[Dict[str, Any]],
@@ -1322,58 +1108,6 @@ class EnhancedConversationService:
             context_parts.append("\n\nWeave these recent experiences into the conversation naturally when relevant. Focus on what genuinely connects to what the user is asking about.")
 
         return "".join(context_parts)
-
-    def _evaluate_word_usage(
-        self,
-        user_message: str,
-        suggested_word: str,
-        ai_response: str
-    ) -> tuple[WordUsageStatus, Optional[str]]:
-        """Evaluate if the suggested word was used correctly."""
-
-        user_lower = user_message.lower()
-        suggested_lower = suggested_word.lower()
-
-        if suggested_lower not in user_lower:
-            return WordUsageStatus.NOT_USED, None
-
-        # Simple heuristic for correctness - could be enhanced with NLP
-        # For now, assume usage is correct if word appears in context
-        return WordUsageStatus.USED_CORRECTLY, None
-
-    async def get_context_summary(
-        self,
-        user_id: str,
-        conversation_id: str
-    ) -> Dict[str, Any]:
-        """Get summary of available context for debugging/monitoring."""
-
-        try:
-            # Get state influence summary
-            state_summary = await self.state_influence_service.get_state_influence_summary(
-                user_id, conversation_id
-            )
-
-            # Get global state
-            global_state = await self.state_manager_service.get_current_global_state()
-
-            # Get cache status
-            cache_status = self.contextual_backstory_service.get_cache_status()
-
-            return {
-                "state_influence": state_summary,
-                "global_state_available": len(global_state) > 0,
-                "backstory_cache": cache_status,
-                "config": {
-                    "recent_events_hours": self.config.RECENT_EVENTS_HOURS_BACK,
-                    "max_events": self.config.MAX_EVENTS_COUNT,
-                    "max_backstory_chars": self.config.MAX_BACKSTORY_CHARS
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error getting context summary: {str(e)}")
-            return {"error": str(e)}
 
     def _analyze_message_sentiment(self, user_message: str) -> Dict[str, Any]:
         """
@@ -1560,28 +1294,3 @@ class EnhancedConversationService:
             return "12-25"  # Can be more detailed
         else:  # complex
             return "15-35"  # Full response allowed
-
-    async def _monitor_mood_analysis_performance(
-        self,
-        start_time: float,
-        mood_analysis_start: float,
-        timing_metrics: Dict[str, float]
-    ) -> None:
-        """Monitor mood analysis performance and log warnings if exceeding thresholds."""
-        try:
-            mood_analysis_time = (time.time() - mood_analysis_start) * 1000
-            timing_metrics["mood_analysis_ms"] = mood_analysis_time
-
-            # Check performance threshold (100ms as specified in Story 2.6 requirements)
-            if mood_analysis_time > 100:
-                logger.warning(
-                    f"Mood analysis exceeded 100ms threshold: {mood_analysis_time:.2f}ms"
-                )
-
-            # Add to context gathering time
-            timing_metrics["context_gathering_ms"] = timing_metrics.get("context_gathering_ms", 0) + mood_analysis_time
-
-        except Exception as e:
-            logger.error(f"Error monitoring mood analysis performance: {e}")
-
-

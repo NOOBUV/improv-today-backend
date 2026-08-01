@@ -566,29 +566,3 @@ Return JSON:
 
         except Exception as e:
             logger.error(f"Error tracking consciousness performance: {e}")
-
-    def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get consciousness generation performance metrics."""
-        total_requests = self._success_count + self._failure_count
-        success_rate = (self._success_count / total_requests * 100) if total_requests > 0 else 0
-
-        return {
-            "total_requests": total_requests,
-            "success_count": self._success_count,
-            "failure_count": self._failure_count,
-            "fallback_count": self._fallback_count,
-            "success_rate_percent": round(success_rate, 2),
-            "consciousness_level": self.consciousness_config.consciousness_level.value,
-            "fallback_mode_active": self.consciousness_config.fallback_mode_active,
-            "last_fallback_reason": self.consciousness_config.last_fallback_reason,
-            "configuration_summary": self.consciousness_config.get_configuration_summary()
-        }
-
-    def reset_performance_metrics(self) -> None:
-        """Reset performance tracking counters."""
-        self._success_count = 0
-        self._failure_count = 0
-        self._fallback_count = 0
-        logger.info("Consciousness generation performance metrics reset")
-
-
