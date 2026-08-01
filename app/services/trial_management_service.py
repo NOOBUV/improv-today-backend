@@ -2,8 +2,10 @@
 import logging
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.subscription import UserSubscription
 from app.models.user import User
@@ -104,7 +106,7 @@ class TrialManagementService:
             logger.info(f"Expired trial for subscription {subscription.id} (user {subscription.user_id})")
             return True
             
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Failed to expire trial for subscription {subscription.id}: {str(e)}")
             db.rollback()
             return False
@@ -273,7 +275,7 @@ class TrialManagementService:
             
             return True
             
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(f"Failed to send trial warning for subscription {subscription.id}: {str(e)}")
             return False
     
@@ -353,6 +355,8 @@ class TrialManagementService:
                 metadata=metadata
             )
             
-        except Exception as e:
+        except (SQLAlchemyError, HTTPException, ValueError) as e:
+            # HTTPException: StripeService re-raises StripeError as one.
+            # ValueError: StripeService() refuses to build without STRIPE_SECRET_KEY.
             logger.error(f"Failed to create upgrade checkout session for user {user_id}: {str(e)}")
             return None

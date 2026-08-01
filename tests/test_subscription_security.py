@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth.subscription_guard import require_active_subscription, SubscriptionGuard
 from app.auth.dependencies import get_current_user, get_current_user_optional
@@ -239,10 +240,10 @@ class TestSubscriptionSecurityGuards:
     ):
         """Test subscription guard handles database errors gracefully."""
         # Mock database error
-        mock_db.query.side_effect = Exception("Database connection failed")
+        mock_db.query.side_effect = SQLAlchemyError("Database connection failed")
 
         # Mock the subscription service to handle the error gracefully
-        subscription_guard._subscription_service.check_user_subscription_status.side_effect = Exception("Database connection failed")
+        subscription_guard._subscription_service.check_user_subscription_status.side_effect = SQLAlchemyError("Database connection failed")
 
         # Test
         result = subscription_guard.verify_conversation_access(sample_user, mock_db)
@@ -291,7 +292,7 @@ class TestSubscriptionSecurityGuards:
         with patch('app.auth.subscription_guard.subscription_guard.verify_conversation_access') as mock_verify:
             with patch('app.auth.subscription_guard.subscription_guard.subscription_service.check_user_subscription_status') as mock_status:
                 mock_verify.return_value = False
-                mock_status.side_effect = Exception("Service unavailable")
+                mock_status.side_effect = SQLAlchemyError("Service unavailable")
 
                 # Test that generic error message is used
                 with pytest.raises(HTTPException) as exc_info:

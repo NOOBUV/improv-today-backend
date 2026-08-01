@@ -319,7 +319,10 @@ class StripeService:
         except SignatureVerificationError as e:
             logger.error(f"Webhook signature verification failed: {str(e)}")
             raise HTTPException(status_code=400, detail="Invalid webhook signature")
-        except Exception as e:
+        except (ValueError, KeyError) as e:
+            # Malformed payload: construct_event raises ValueError, the event dict
+            # may be missing keys, WebhookEvent validation raises ValueError.
+            # HTTPExceptions raised above now surface their own detail.
             logger.error(f"Webhook processing failed: {str(e)}")
             raise HTTPException(status_code=400, detail="Webhook processing failed")
 
@@ -371,7 +374,8 @@ class StripeService:
                 status=active_sub.status
             )
             
-        except Exception as e:
+        except (HTTPException, StripeError) as e:
+            # get_customer_subscriptions re-raises StripeError as HTTPException
             logger.error(f"Failed to check subscription status: {str(e)}")
             return SubscriptionStatus(
                 is_active=False,

@@ -622,8 +622,10 @@ async def handle_stripe_webhook(request: Request, db: Session = Depends(get_db))
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Webhook processing failed: {str(e)}")
+    except Exception:
+        # Safety net kept on purpose: the handler must answer Stripe with a clean
+        # 500 (so it retries) rather than leak a traceback from any _handle_* path.
+        logger.exception("Webhook processing failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Webhook processing failed"

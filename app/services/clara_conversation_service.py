@@ -118,7 +118,7 @@ class ClaraConversationService:
 
             # Sub-operation 2: Context gathering with detailed breakdown
             context_start = time.time()
-            print(f"⏱️  [{correlation_id}] Starting context gathering...", flush=True)
+            logger.debug(f"[{correlation_id}] Starting context gathering...")
             simulation_context = {}
 
             try:
@@ -128,7 +128,7 @@ class ClaraConversationService:
                     )
 
                     context_time = (time.time() - context_start) * 1000
-                    print(f"⏱️  [{correlation_id}] Context gathering completed: {context_time:.0f}ms", flush=True)
+                    logger.debug(f"[{correlation_id}] Context gathering completed: {context_time:.0f}ms")
 
                     s.meta(
                         context_items_gathered=len(simulation_context),
@@ -145,7 +145,7 @@ class ClaraConversationService:
                 try:
                     # Branch: streaming vs non-streaming response
                     if stream:
-                        print(f"⏱️  [{correlation_id}] Returning streaming generator (will execute when consumed)", flush=True)
+                        logger.debug(f"[{correlation_id}] Returning streaming generator (will execute when consumed)")
                         # Return async generator for SSE streaming
                         return self._respond_stream(
                             user_message=user_message,
@@ -562,7 +562,7 @@ class ClaraConversationService:
         (or a single error event if anything above it raises).
         """
         start_time = time.time()
-        print(f"⏱️  [{correlation_id}] STREAM START - Beginning context-aware response generation", flush=True)
+        logger.debug(f"[{correlation_id}] STREAM START - Beginning context-aware response generation")
 
         try:
             yield self._format_sse_event("processing_start", {
@@ -606,7 +606,7 @@ class ClaraConversationService:
 
                 if first_chunk_time is None:
                     first_chunk_time = time.time()
-                    print(f"⚡ [{correlation_id}] FIRST TOKEN RECEIVED: {(first_chunk_time - start_time) * 1000:.0f}ms from stream start", flush=True)
+                    logger.info(f"[{correlation_id}] FIRST TOKEN RECEIVED: {(first_chunk_time - start_time) * 1000:.0f}ms from stream start")
 
                 chunk_text = chunk.choices[0].delta.content
                 accumulated_response += chunk_text

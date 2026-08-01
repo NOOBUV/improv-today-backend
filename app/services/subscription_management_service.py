@@ -2,8 +2,11 @@
 import logging
 from typing import Optional, List
 from datetime import datetime, timezone
+from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, and_
+from sqlalchemy.exc import SQLAlchemyError
+from stripe.error import StripeError
 
 from app.models.subscription import SubscriptionPlan, UserSubscription, PaymentRecord
 from app.models.user import User
@@ -235,7 +238,8 @@ class SubscriptionManagementService:
                 status=subscription.status
             )
 
-        except Exception as e:
+        except (SQLAlchemyError, TypeError, ValueError) as e:
+            # TypeError: period/trial dates compared against missing or malformed values
             logger.error(f"Failed to check subscription status for user {user_id}: {str(e)}")
             return SubscriptionStatus(
                 is_active=False,
@@ -277,7 +281,8 @@ class SubscriptionManagementService:
             logger.info(f"Cancelled subscription {subscription.id} for user {user_id}")
             return subscription
             
-        except Exception as e:
+        except (SQLAlchemyError, StripeError, HTTPException, ValueError) as e:
+            # ValueError: StripeService() refuses to build without STRIPE_SECRET_KEY
             logger.error(f"Failed to cancel subscription for user {user_id}: {str(e)}")
             return None
 
@@ -357,7 +362,7 @@ class SubscriptionManagementService:
             logger.info(f"Synced subscription {local_sub.id} from Stripe")
             return local_sub
             
-        except Exception as e:
+        except (SQLAlchemyError, StripeError, HTTPException, ValueError, AttributeError) as e:
             logger.error(f"Failed to sync subscription from Stripe: {str(e)}")
             return None
 
