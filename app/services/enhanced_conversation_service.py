@@ -7,11 +7,10 @@ from typing import Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime, timezone
 import json
 import time
-import uuid
-import traceback
 
 from app.core.conversation_config import conversation_config
 from app.services.contextual_backstory_service import ContextualBackstoryService
+from app.services.conversation_performance import ConversationPerformanceMonitor, maybe_step
 from app.services.conversation_prompt_service import ConversationPromptService
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
 from app.services.simulation.state_manager import StateManagerService
@@ -22,236 +21,6 @@ from app.core.config import settings
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
-
-
-class ConversationPerformanceMonitor:
-    """
-    Comprehensive performance monitoring for conversation pipeline.
-    Tracks timing metrics, generates correlation IDs, and provides detailed logging.
-    """
-
-    def __init__(self):
-        self.performance_logger = logging.getLogger(f"{__name__}.performance")
-        self.alert_thresholds = {
-            "total_response_time_ms": 3000,  # <3s total response time requirement
-            "consciousness_generation_ms": 2000,  # <2s consciousness generation
-            "context_gathering_ms": 1000,  # <1s context processing
-            "response_formatting_ms": 500,  # <500ms response formatting
-
-            # Granular conversation response component thresholds
-            "context_extraction_ms": 50,  # <50ms to extract simulation context components
-            "emotion_selection_ms": 100,  # <100ms for emotion selection with mood awareness
-            "prompt_construction_ms": 200,  # <200ms for enhanced prompt building
-            "openai_api_call_ms": 1500,  # <1.5s for OpenAI API response
-            "response_parsing_ms": 100,  # <100ms for JSON parsing and formatting
-
-            # Context gathering sub-components
-            "global_state_retrieval_ms": 100,  # <100ms for database state retrieval
-            "event_selection_ms": 200,  # <200ms for event selection service
-            "backstory_selection_ms": 150,  # <150ms for backstory content selection
-            "sentiment_analysis_ms": 50,  # <50ms for message sentiment analysis
-            "state_influence_calculation_ms": 100,  # <100ms for state influence calculations
-        }
-
-    def create_conversation_correlation_id(self, user_id: str, conversation_id: str) -> str:
-        """Generate unique correlation ID for conversation tracking."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        unique_id = str(uuid.uuid4())[:8]
-        return f"conv_{user_id[:8]}_{conversation_id[:8]}_{timestamp}_{unique_id}"
-
-    def start_timing_context(self, correlation_id: str, operation: str) -> Dict[str, Any]:
-        """Start timing context for a specific operation."""
-        start_time = time.time()
-        context = {
-            "correlation_id": correlation_id,
-            "operation": operation,
-            "start_time": start_time,
-            "start_timestamp": datetime.now(timezone.utc).isoformat(),
-            "sub_operations": {}
-        }
-
-        self.performance_logger.info(
-            f"[{correlation_id}] Starting {operation}",
-            extra={
-                "correlation_id": correlation_id,
-                "operation": operation,
-                "event_type": "operation_start",
-                "timestamp": context["start_timestamp"]
-            }
-        )
-
-        return context
-
-    def end_timing_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """End timing context and calculate final metrics."""
-        end_time = time.time()
-        total_duration_ms = (end_time - context["start_time"]) * 1000
-
-        metrics = {
-            "correlation_id": context["correlation_id"],
-            "operation": context["operation"],
-            "total_duration_ms": round(total_duration_ms, 2),
-            "start_timestamp": context["start_timestamp"],
-            "end_timestamp": datetime.now(timezone.utc).isoformat(),
-            "sub_operations": context["sub_operations"]
-        }
-
-        # Check thresholds and alert if exceeded
-        self._check_performance_thresholds(metrics)
-
-        self.performance_logger.info(
-            f"[{context['correlation_id']}] Completed {context['operation']} in {total_duration_ms:.2f}ms",
-            extra={
-                **metrics,
-                "event_type": "operation_complete"
-            }
-        )
-
-        return metrics
-
-    def time_sub_operation(self, context: Dict[str, Any], sub_operation: str) -> Dict[str, Any]:
-        """Start timing a sub-operation within the main context."""
-        start_time = time.time()
-        sub_context = {
-            "start_time": start_time,
-            "start_timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-        self.performance_logger.debug(
-            f"[{context['correlation_id']}] Starting sub-operation: {sub_operation}",
-            extra={
-                "correlation_id": context["correlation_id"],
-                "parent_operation": context["operation"],
-                "sub_operation": sub_operation,
-                "event_type": "sub_operation_start"
-            }
-        )
-
-        return sub_context
-
-    def end_sub_operation(self, context: Dict[str, Any], sub_operation: str, sub_context: Dict[str, Any], **metadata) -> float:
-        """End timing for a sub-operation and record metrics."""
-        end_time = time.time()
-        duration_ms = (end_time - sub_context["start_time"]) * 1000
-
-        sub_operation_data = {
-            "duration_ms": round(duration_ms, 2),
-            "start_timestamp": sub_context["start_timestamp"],
-            "end_timestamp": datetime.now(timezone.utc).isoformat(),
-            **metadata
-        }
-
-        context["sub_operations"][sub_operation] = sub_operation_data
-
-        self.performance_logger.debug(
-            f"[{context['correlation_id']}] Completed sub-operation {sub_operation} in {duration_ms:.2f}ms",
-            extra={
-                "correlation_id": context["correlation_id"],
-                "parent_operation": context["operation"],
-                "sub_operation": sub_operation,
-                "duration_ms": duration_ms,
-                "event_type": "sub_operation_complete",
-                **metadata
-            }
-        )
-
-        # Check sub-operation thresholds
-        threshold_key = f"{sub_operation}_ms"
-        if threshold_key in self.alert_thresholds and duration_ms > self.alert_thresholds[threshold_key]:
-            self.performance_logger.warning(
-                f"[{context['correlation_id']}] {sub_operation} exceeded threshold: {duration_ms:.2f}ms > {self.alert_thresholds[threshold_key]}ms",
-                extra={
-                    "correlation_id": context["correlation_id"],
-                    "sub_operation": sub_operation,
-                    "duration_ms": duration_ms,
-                    "threshold_ms": self.alert_thresholds[threshold_key],
-                    "event_type": "threshold_exceeded"
-                }
-            )
-
-        return duration_ms
-
-    def _check_performance_thresholds(self, metrics: Dict[str, Any]) -> None:
-        """Check if performance metrics exceed defined thresholds."""
-        correlation_id = metrics["correlation_id"]
-        operation = metrics["operation"]
-        total_duration = metrics["total_duration_ms"]
-
-        # Check total response time
-        if operation == "enhanced_conversation_response" and total_duration > self.alert_thresholds["total_response_time_ms"]:
-            self.performance_logger.warning(
-                f"[{correlation_id}] Total conversation response time exceeded threshold: {total_duration:.2f}ms > {self.alert_thresholds['total_response_time_ms']}ms",
-                extra={
-                    "correlation_id": correlation_id,
-                    "total_duration_ms": total_duration,
-                    "threshold_ms": self.alert_thresholds["total_response_time_ms"],
-                    "event_type": "total_threshold_exceeded",
-                    "sub_operations_breakdown": metrics["sub_operations"]
-                }
-            )
-
-    def log_error_with_context(self, context: Dict[str, Any], error: Exception, operation: str = None) -> None:
-        """Log error with full performance context."""
-        operation_name = operation or context.get("operation", "unknown")
-        correlation_id = context.get("correlation_id", "unknown")
-
-        current_time = time.time()
-        duration_so_far = (current_time - context.get("start_time", current_time)) * 1000
-
-        self.performance_logger.error(
-            f"[{correlation_id}] Error in {operation_name} after {duration_so_far:.2f}ms: {str(error)}",
-            extra={
-                "correlation_id": correlation_id,
-                "operation": operation_name,
-                "error_message": str(error),
-                "error_type": type(error).__name__,
-                "duration_until_error_ms": duration_so_far,
-                "traceback": traceback.format_exc(),
-                "event_type": "operation_error",
-                "sub_operations_completed": context.get("sub_operations", {})
-            }
-        )
-
-    def log_detailed_timing_breakdown(self, metrics: Dict[str, Any]) -> None:
-        """Log detailed timing breakdown for conversation analysis."""
-        correlation_id = metrics["correlation_id"]
-        operation = metrics["operation"]
-        total_duration = metrics["total_duration_ms"]
-        sub_operations = metrics.get("sub_operations", {})
-
-        # Create a detailed breakdown log
-        breakdown_lines = [f"[{correlation_id}] DETAILED TIMING BREAKDOWN for {operation} ({total_duration:.2f}ms total):"]
-
-        # Sort sub-operations by duration (slowest first)
-        sorted_ops = sorted(sub_operations.items(), key=lambda x: x[1].get("duration_ms", 0), reverse=True)
-
-        for op_name, op_data in sorted_ops:
-            duration = op_data.get("duration_ms", 0)
-            percentage = (duration / total_duration * 100) if total_duration > 0 else 0
-
-            # Add warning emoji for operations exceeding thresholds
-            threshold_key = f"{op_name}_ms"
-            warning = ""
-            if threshold_key in self.alert_thresholds and duration > self.alert_thresholds[threshold_key]:
-                warning = " ⚠️ SLOW"
-                exceeded_by = duration - self.alert_thresholds[threshold_key]
-                warning += f" (+{exceeded_by:.1f}ms over {self.alert_thresholds[threshold_key]}ms threshold)"
-
-            breakdown_lines.append(f"  • {op_name}: {duration:.2f}ms ({percentage:.1f}%){warning}")
-
-            # Add metadata if available
-            metadata = {k: v for k, v in op_data.items() if k not in ['duration_ms', 'start_timestamp', 'end_timestamp']}
-            if metadata:
-                breakdown_lines.append(f"    └─ {metadata}")
-
-        # Log the complete breakdown
-        self.performance_logger.info("\n".join(breakdown_lines), extra={
-            "correlation_id": correlation_id,
-            "event_type": "detailed_timing_breakdown",
-            "total_duration_ms": total_duration,
-            "operation": operation,
-            "sub_operations_count": len(sub_operations)
-        })
 
 
 class EnhancedConversationService:
@@ -319,65 +88,56 @@ class EnhancedConversationService:
             logger.info(f"[{correlation_id}] Generating enhanced response for user {user_id}, conversation {conversation_id}")
 
             # Sub-operation 1: Request parsing and session state setup
-            parse_context = self.performance_monitor.time_sub_operation(timing_context, "request_parsing")
-
-            # Store user message in session state
-            await self.session_state_service.add_conversation_message(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                message_type="user",
-                message_content=user_message
-            )
-
-            # Get conversation history from session state if not provided
-            if not conversation_history:
-                conversation_history = await self.session_state_service.get_conversation_history(
+            with self.performance_monitor.step(timing_context, "request_parsing") as s:
+                # Store user message in session state
+                await self.session_state_service.add_conversation_message(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    max_messages=4  # Reduced from 10 to 4 (2 exchanges) for faster TTFT
+                    message_type="user",
+                    message_content=user_message
                 )
 
-            self.performance_monitor.end_sub_operation(
-                timing_context, "request_parsing", parse_context,
-                user_message_length=len(user_message),
-                history_retrieved=bool(conversation_history),
-                fresh_events_provided=len(fresh_events) if fresh_events else 0
-            )
+                # Get conversation history from session state if not provided
+                if not conversation_history:
+                    conversation_history = await self.session_state_service.get_conversation_history(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        max_messages=4  # Reduced from 10 to 4 (2 exchanges) for faster TTFT
+                    )
+
+                s.meta(
+                    user_message_length=len(user_message),
+                    history_retrieved=bool(conversation_history),
+                    fresh_events_provided=len(fresh_events) if fresh_events else 0
+                )
 
             # Sub-operation 2: Context gathering with detailed breakdown
             context_start = time.time()
             print(f"⏱️  [{correlation_id}] Starting context gathering...", flush=True)
-            context_sub_context = self.performance_monitor.time_sub_operation(timing_context, "context_gathering")
             simulation_context = {}
 
             try:
-                simulation_context = await self._gather_simulation_context_with_monitoring(
-                    user_message, user_id, conversation_id, user_preferences, fresh_events, timing_context
-                )
+                with self.performance_monitor.step(timing_context, "context_gathering") as s:
+                    simulation_context = await self._gather_simulation_context_with_monitoring(
+                        user_message, user_id, conversation_id, user_preferences, fresh_events, timing_context
+                    )
 
-                context_time = (time.time() - context_start) * 1000
-                print(f"⏱️  [{correlation_id}] Context gathering completed: {context_time:.0f}ms", flush=True)
+                    context_time = (time.time() - context_start) * 1000
+                    print(f"⏱️  [{correlation_id}] Context gathering completed: {context_time:.0f}ms", flush=True)
 
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "context_gathering", context_sub_context,
-                    context_items_gathered=len(simulation_context),
-                    recent_events_count=len(simulation_context.get("recent_events", [])),
-                    backstory_chars=simulation_context.get("selected_backstory", {}).get("char_count", 0)
-                )
+                    s.meta(
+                        context_items_gathered=len(simulation_context),
+                        recent_events_count=len(simulation_context.get("recent_events", [])),
+                        backstory_chars=simulation_context.get("selected_backstory", {}).get("char_count", 0)
+                    )
 
             except Exception as e:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "context_gathering", context_sub_context,
-                    error=str(e), fallback_triggered=True
-                )
                 self.performance_monitor.log_error_with_context(timing_context, e, "context_gathering")
                 logger.warning(f"[{correlation_id}] Context gathering failed, using fallback: {str(e)}")
 
             # Sub-operation 3: Consciousness generation (enhanced context-aware response)
             if simulation_context and self.openai_client:
                 try:
-                    consciousness_context = self.performance_monitor.time_sub_operation(timing_context, "consciousness_generation")
-
                     # Branch: streaming vs non-streaming response
                     if stream:
                         print(f"⏱️  [{correlation_id}] Returning streaming generator (will execute when consumed)", flush=True)
@@ -392,7 +152,8 @@ class EnhancedConversationService:
                             timing_context=timing_context,
                             correlation_id=correlation_id
                         )
-                    else:
+
+                    with self.performance_monitor.step(timing_context, "consciousness_generation") as s:
                         # Non-streaming: wait for complete response
                         response = await self._generate_context_aware_response_with_monitoring(
                             user_message=user_message,
@@ -402,48 +163,45 @@ class EnhancedConversationService:
                             timing_context=timing_context
                         )
 
-                    self.performance_monitor.end_sub_operation(
-                        timing_context, "consciousness_generation", consciousness_context,
-                        response_length=len(response.get("ai_response", "")),
-                        enhanced_mode=True,
-                        emotion_selected=response.get("simulation_context", {}).get("conversation_emotion")
-                    )
+                        s.meta(
+                            response_length=len(response.get("ai_response", "")),
+                            enhanced_mode=True,
+                            emotion_selected=response.get("simulation_context", {}).get("conversation_emotion")
+                        )
 
                     # Sub-operation 4: Response formatting and session state update
-                    formatting_context = self.performance_monitor.time_sub_operation(timing_context, "response_formatting")
+                    with self.performance_monitor.step(timing_context, "response_formatting") as s:
+                        # Add comprehensive performance metrics
+                        final_metrics = self.performance_monitor.end_timing_context(timing_context)
 
-                    # Add comprehensive performance metrics
-                    final_metrics = self.performance_monitor.end_timing_context(timing_context)
+                        # Log detailed timing breakdown for analysis
+                        self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
 
-                    # Log detailed timing breakdown for analysis
-                    self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
+                        response["performance_metrics"] = final_metrics
+                        response["enhanced_mode"] = True
+                        response["correlation_id"] = correlation_id
 
-                    response["performance_metrics"] = final_metrics
-                    response["enhanced_mode"] = True
-                    response["correlation_id"] = correlation_id
+                        # Store Clara's response in session state
+                        await self.session_state_service.add_conversation_message(
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            message_type="assistant",
+                            message_content=response.get("ai_response", ""),
+                            metadata={
+                                "conversation_emotion": response.get("simulation_context", {}).get("conversation_emotion"),
+                                "global_mood": response.get("simulation_context", {}).get("global_mood"),
+                                "enhanced_mode": True,
+                                "correlation_id": correlation_id
+                            }
+                        )
 
-                    # Store Clara's response in session state
-                    await self.session_state_service.add_conversation_message(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message_type="assistant",
-                        message_content=response.get("ai_response", ""),
-                        metadata={
-                            "conversation_emotion": response.get("simulation_context", {}).get("conversation_emotion"),
-                            "global_mood": response.get("simulation_context", {}).get("global_mood"),
-                            "enhanced_mode": True,
-                            "correlation_id": correlation_id
-                        }
-                    )
+                        # Track events mentioned to prevent repetition
+                        await self._track_events_mentioned(simulation_context, user_id, conversation_id)
 
-                    # Track events mentioned to prevent repetition
-                    await self._track_events_mentioned(simulation_context, user_id, conversation_id)
-
-                    self.performance_monitor.end_sub_operation(
-                        timing_context, "response_formatting", formatting_context,
-                        session_state_updated=True,
-                        events_tracked=len(simulation_context.get("content_selection_metadata", {}).get("fresh_events_used", []))
-                    )
+                        s.meta(
+                            session_state_updated=True,
+                            events_tracked=len(simulation_context.get("content_selection_metadata", {}).get("fresh_events_used", []))
+                        )
 
                     logger.info(f"[{correlation_id}] Enhanced response completed in {final_metrics['total_duration_ms']:.2f}ms")
                     return response
@@ -454,58 +212,54 @@ class EnhancedConversationService:
                     logger.warning(f"[{correlation_id}] Enhanced response generation failed: {str(e)}")
 
             # Sub-operation 5: Fallback response generation
-            fallback_context = self.performance_monitor.time_sub_operation(timing_context, "fallback_response")
+            with self.performance_monitor.step(timing_context, "fallback_response") as s:
+                logger.info(f"[{correlation_id}] Using fallback response generation")
+                fallback_response = await self.simple_openai_service.generate_coaching_response(
+                    message=user_message,
+                    conversation_history=conversation_history or "",
+                    personality=personality
+                )
 
-            logger.info(f"[{correlation_id}] Using fallback response generation")
-            fallback_response = await self.simple_openai_service.generate_coaching_response(
-                message=user_message,
-                conversation_history=conversation_history or "",
-                personality=personality
-            )
-
-            self.performance_monitor.end_sub_operation(
-                timing_context, "fallback_response", fallback_context,
-                response_length=len(fallback_response.ai_response),
-                fallback_mode=True
-            )
+                s.meta(
+                    response_length=len(fallback_response.ai_response),
+                    fallback_mode=True
+                )
 
             # Sub-operation 6: Fallback response formatting
-            formatting_context = self.performance_monitor.time_sub_operation(timing_context, "response_formatting")
+            with self.performance_monitor.step(timing_context, "response_formatting") as s:
+                final_metrics = self.performance_monitor.end_timing_context(timing_context)
 
-            final_metrics = self.performance_monitor.end_timing_context(timing_context)
+                # Log detailed timing breakdown for fallback analysis
+                self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
 
-            # Log detailed timing breakdown for fallback analysis
-            self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
-
-            result = {
-                "ai_response": fallback_response.ai_response,
-                "corrected_transcript": fallback_response.corrected_transcript,
-                "simulation_context": simulation_context,
-                "selected_backstory_types": [],
-                "fallback_mode": True,
-                "enhanced_mode": False,
-                "performance_metrics": final_metrics,
-                "correlation_id": correlation_id
-            }
-
-            # Store fallback response in session state
-            await self.session_state_service.add_conversation_message(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                message_type="assistant",
-                message_content=fallback_response.ai_response,
-                metadata={
+                result = {
+                    "ai_response": fallback_response.ai_response,
+                    "corrected_transcript": fallback_response.corrected_transcript,
+                    "simulation_context": simulation_context,
+                    "selected_backstory_types": [],
                     "fallback_mode": True,
                     "enhanced_mode": False,
+                    "performance_metrics": final_metrics,
                     "correlation_id": correlation_id
                 }
-            )
 
-            self.performance_monitor.end_sub_operation(
-                timing_context, "response_formatting", formatting_context,
-                session_state_updated=True,
-                fallback_mode=True
-            )
+                # Store fallback response in session state
+                await self.session_state_service.add_conversation_message(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_type="assistant",
+                    message_content=fallback_response.ai_response,
+                    metadata={
+                        "fallback_mode": True,
+                        "enhanced_mode": False,
+                        "correlation_id": correlation_id
+                    }
+                )
+
+                s.meta(
+                    session_state_updated=True,
+                    fallback_mode=True
+                )
 
             logger.info(f"[{correlation_id}] Fallback response completed in {final_metrics['total_duration_ms']:.2f}ms")
             return result
@@ -531,48 +285,37 @@ class EnhancedConversationService:
 
         try:
             # Sub-sub-operation: Global state retrieval
-            if timing_context:
-                state_context = self.performance_monitor.time_sub_operation(timing_context, "global_state_retrieval")
-
-            global_state = await self.state_manager_service.get_current_global_state()
-            context["global_state"] = global_state
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "global_state_retrieval", state_context,
-                    traits_count=len(global_state)
-                )
+            with maybe_step(self.performance_monitor, timing_context, "global_state_retrieval") as s:
+                global_state = await self.state_manager_service.get_current_global_state()
+                context["global_state"] = global_state
+                s.meta(traits_count=len(global_state))
 
             logger.debug(f"Retrieved global state: {len(global_state)} traits")
 
             # Sub-sub-operation: Event selection and processing
-            if timing_context:
-                events_context = self.performance_monitor.time_sub_operation(timing_context, "event_selection")
+            with maybe_step(self.performance_monitor, timing_context, "event_selection") as s:
+                if fresh_events is not None:
+                    logger.info(f"Using pre-selected fresh events: {len(fresh_events)} events")
+                    fresh_events_data = fresh_events
+                else:
+                    logger.info("Fetching fresh events from event selection service")
+                    fresh_events_data = await self.event_selection_service.get_contextual_events(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        max_events=self.config.MAX_EVENTS_COUNT
+                    )
 
-            if fresh_events is not None:
-                logger.info(f"Using pre-selected fresh events: {len(fresh_events)} events")
-                fresh_events_data = fresh_events
-            else:
-                logger.info("Fetching fresh events from event selection service")
-                fresh_events_data = await self.event_selection_service.get_contextual_events(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    user_message=user_message,
-                    max_events=self.config.MAX_EVENTS_COUNT
-                )
+                context["recent_events"] = [event.get("original_event", event) for event in fresh_events_data]
+                context["content_selection_metadata"] = {
+                    "strategy": "fresh_events_rotation",
+                    "entities_found": [],
+                    "total_analyzed": len(fresh_events_data),
+                    "selected_count": len(fresh_events_data),
+                    "fresh_events_used": [event.get("id") for event in fresh_events_data]
+                }
 
-            context["recent_events"] = [event.get("original_event", event) for event in fresh_events_data]
-            context["content_selection_metadata"] = {
-                "strategy": "fresh_events_rotation",
-                "entities_found": [],
-                "total_analyzed": len(fresh_events_data),
-                "selected_count": len(fresh_events_data),
-                "fresh_events_used": [event.get("id") for event in fresh_events_data]
-            }
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "event_selection", events_context,
+                s.meta(
                     events_selected=len(fresh_events_data),
                     pre_selected=fresh_events is not None
                 )
@@ -580,18 +323,13 @@ class EnhancedConversationService:
             logger.info(f"Fresh events selection: {len(fresh_events_data)} events selected")
 
             # Sub-sub-operation: Backstory content selection
-            if timing_context:
-                backstory_context = self.performance_monitor.time_sub_operation(timing_context, "backstory_selection")
-
-            backstory_context_data = await self.contextual_backstory_service.select_relevant_content(
-                user_message=user_message,
-                max_chars=int(self.config.MAX_BACKSTORY_CHARS * 0.6)
-            )
-            context["selected_backstory"] = backstory_context_data
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "backstory_selection", backstory_context,
+            with maybe_step(self.performance_monitor, timing_context, "backstory_selection") as s:
+                backstory_context_data = await self.contextual_backstory_service.select_relevant_content(
+                    user_message=user_message,
+                    max_chars=int(self.config.MAX_BACKSTORY_CHARS * 0.6)
+                )
+                context["selected_backstory"] = backstory_context_data
+                s.meta(
                     chars_selected=backstory_context_data['char_count'],
                     content_types=len(backstory_context_data['content_types'])
                 )
@@ -599,38 +337,26 @@ class EnhancedConversationService:
             logger.debug(f"Selected backstory: {backstory_context_data['char_count']} chars, types: {backstory_context_data['content_types']}")
 
             # Sub-sub-operation: Conversation sentiment analysis
-            if timing_context:
-                sentiment_context = self.performance_monitor.time_sub_operation(timing_context, "sentiment_analysis")
-
-            conversation_sentiment_analysis = self._analyze_message_sentiment(user_message)
-            conversation_sentiment_score = conversation_sentiment_analysis.get("sentiment_score", 0.0)
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "sentiment_analysis", sentiment_context,
+            with maybe_step(self.performance_monitor, timing_context, "sentiment_analysis") as s:
+                conversation_sentiment_analysis = self._analyze_message_sentiment(user_message)
+                conversation_sentiment_score = conversation_sentiment_analysis.get("sentiment_score", 0.0)
+                s.meta(
                     sentiment_score=conversation_sentiment_score,
                     complexity=conversation_sentiment_analysis.get("complexity", "unknown")
                 )
 
             # Sub-sub-operation: State influence calculation
-            if timing_context:
-                influence_context = self.performance_monitor.time_sub_operation(timing_context, "state_influence_calculation")
-
-            conversation_context = await self.state_influence_service.build_conversation_context(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                scenario=ConversationScenario.CASUAL_CHAT,
-                user_preferences=user_preferences,
-                conversation_sentiment=conversation_sentiment_score,
-                recent_events=context["recent_events"]
-            )
-            context["conversation_influence"] = conversation_context
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "state_influence_calculation", influence_context,
-                    influence_factors=len(conversation_context)
+            with maybe_step(self.performance_monitor, timing_context, "state_influence_calculation") as s:
+                conversation_context = await self.state_influence_service.build_conversation_context(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    scenario=ConversationScenario.CASUAL_CHAT,
+                    user_preferences=user_preferences,
+                    conversation_sentiment=conversation_sentiment_score,
+                    recent_events=context["recent_events"]
                 )
+                context["conversation_influence"] = conversation_context
+                s.meta(influence_factors=len(conversation_context))
 
             logger.debug(f"Built conversation context with {len(conversation_context)} influence factors")
 
@@ -652,22 +378,18 @@ class EnhancedConversationService:
 
         try:
             # Sub-sub-operation: Extract context components
-            if timing_context:
-                extraction_context = self.performance_monitor.time_sub_operation(timing_context, "context_extraction")
+            with maybe_step(self.performance_monitor, timing_context, "context_extraction") as s:
+                global_state = simulation_context.get("global_state", {})
+                recent_events = simulation_context.get("recent_events", [])
+                selected_backstory = simulation_context.get("selected_backstory", {})
+                conversation_influence = simulation_context.get("conversation_influence", {})
+                content_metadata = simulation_context.get("content_selection_metadata", {})
 
-            global_state = simulation_context.get("global_state", {})
-            recent_events = simulation_context.get("recent_events", [])
-            selected_backstory = simulation_context.get("selected_backstory", {})
-            conversation_influence = simulation_context.get("conversation_influence", {})
-            content_metadata = simulation_context.get("content_selection_metadata", {})
+                mood_transition_data = conversation_influence.get("mood_transition", {})
+                blended_mood = mood_transition_data.get("blended_mood_score", 60)
+                mood_context = mood_transition_data.get("mood_context", {})
 
-            mood_transition_data = conversation_influence.get("mood_transition", {})
-            blended_mood = mood_transition_data.get("blended_mood_score", 60)
-            mood_context = mood_transition_data.get("mood_context", {})
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "context_extraction", extraction_context,
+                s.meta(
                     global_state_items=len(global_state),
                     recent_events_count=len(recent_events),
                     backstory_chars=selected_backstory.get("char_count", 0),
@@ -677,66 +399,53 @@ class EnhancedConversationService:
             logger.debug(f"Using intelligent content selection: {content_metadata.get('strategy', 'unknown')}")
 
             # Sub-sub-operation: Emotion selection with mood awareness
-            if timing_context:
-                emotion_context = self.performance_monitor.time_sub_operation(timing_context, "emotion_selection")
-
-            conversation_emotion, emotion_reasoning = self.conversation_prompt_service.select_conversation_emotion_with_mood(
-                user_message=user_message,
-                conversation_history=conversation_history,
-                blended_mood_score=blended_mood,
-                mood_transition_data=mood_transition_data
-            )
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "emotion_selection", emotion_context,
+            with maybe_step(self.performance_monitor, timing_context, "emotion_selection") as s:
+                conversation_emotion, emotion_reasoning = self.conversation_prompt_service.select_conversation_emotion_with_mood(
+                    user_message=user_message,
+                    conversation_history=conversation_history,
+                    blended_mood_score=blended_mood,
+                    mood_transition_data=mood_transition_data
+                )
+                s.meta(
                     selected_emotion=conversation_emotion.value,
                     blended_mood_score=blended_mood
                 )
 
             # Sub-sub-operation: Prompt construction
-            if timing_context:
-                prompt_context = self.performance_monitor.time_sub_operation(timing_context, "prompt_construction")
+            with maybe_step(self.performance_monitor, timing_context, "prompt_construction") as s:
+                enhanced_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
+                    character_backstory=selected_backstory.get("content", ""),
+                    user_message=user_message,
+                    conversation_emotion=conversation_emotion,
+                    mood_transition_data=mood_transition_data,
+                    conversation_history=conversation_history
+                )
 
-            enhanced_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
-                character_backstory=selected_backstory.get("content", ""),
-                user_message=user_message,
-                conversation_emotion=conversation_emotion,
-                mood_transition_data=mood_transition_data,
-                conversation_history=conversation_history
-            )
+                enhanced_prompt += self._build_simulation_context_prompt(
+                    recent_events, global_state, content_metadata
+                )
 
-            enhanced_prompt += self._build_simulation_context_prompt(
-                recent_events, global_state, content_metadata
-            )
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "prompt_construction", prompt_context,
+                s.meta(
                     prompt_length=len(enhanced_prompt),
                     backstory_chars=len(selected_backstory.get("content", "")),
                     events_included=len(recent_events)
                 )
 
             # Sub-sub-operation: OpenAI API call
-            if timing_context:
-                openai_context = self.performance_monitor.time_sub_operation(timing_context, "openai_api_call")
+            with maybe_step(self.performance_monitor, timing_context, "openai_api_call") as s:
+                response = await self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": enhanced_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    max_tokens=400,
+                    temperature=0.7
+                )
 
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": enhanced_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
+                ai_response_raw = response.choices[0].message.content
 
-            ai_response_raw = response.choices[0].message.content
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "openai_api_call", openai_context,
+                s.meta(
                     model="gpt-4o-mini",
                     prompt_tokens=len(enhanced_prompt.split()),
                     max_tokens=400,
@@ -744,22 +453,18 @@ class EnhancedConversationService:
                 )
 
             # Sub-sub-operation: Response parsing and formatting
-            if timing_context:
-                parsing_context = self.performance_monitor.time_sub_operation(timing_context, "response_parsing")
+            with maybe_step(self.performance_monitor, timing_context, "response_parsing") as s:
+                # Parse JSON response from OpenAI
+                try:
+                    ai_response_json = json.loads(ai_response_raw)
+                    ai_response = ai_response_json.get("message", ai_response_raw)
+                    response_emotion = ai_response_json.get("emotion", conversation_emotion.value)
+                except (json.JSONDecodeError, TypeError):
+                    ai_response = ai_response_raw
+                    response_emotion = conversation_emotion.value
+                    logger.warning(f"Failed to parse JSON response, using raw content: {ai_response_raw[:100]}...")
 
-            # Parse JSON response from OpenAI
-            try:
-                ai_response_json = json.loads(ai_response_raw)
-                ai_response = ai_response_json.get("message", ai_response_raw)
-                response_emotion = ai_response_json.get("emotion", conversation_emotion.value)
-            except (json.JSONDecodeError, TypeError):
-                ai_response = ai_response_raw
-                response_emotion = conversation_emotion.value
-                logger.warning(f"Failed to parse JSON response, using raw content: {ai_response_raw[:100]}...")
-
-            if timing_context:
-                self.performance_monitor.end_sub_operation(
-                    timing_context, "response_parsing", parsing_context,
+                s.meta(
                     json_parsed=ai_response != ai_response_raw,
                     final_response_length=len(ai_response)
                 )

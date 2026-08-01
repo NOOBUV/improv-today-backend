@@ -5,8 +5,9 @@ Tests comprehensive performance monitoring, timing instrumentation, and threshol
 import pytest
 import asyncio
 import time
-from unittest.mock import Mock, AsyncMock, patch
-from app.services.enhanced_conversation_service import ConversationPerformanceMonitor, EnhancedConversationService
+from unittest.mock import Mock, AsyncMock, MagicMock, patch
+from app.services.conversation_performance import ConversationPerformanceMonitor, _Step, maybe_step
+from app.services.enhanced_conversation_service import EnhancedConversationService
 
 
 class TestConversationPerformanceMonitor:
@@ -54,50 +55,65 @@ class TestConversationPerformanceMonitor:
         assert "end_timestamp" in metrics
 
     def test_sub_operation_timing(self, performance_monitor):
-        """Test sub-operation timing functionality."""
+        """Test sub-operation timing via the step() context manager."""
         correlation_id = "test_corr_456"
         main_context = performance_monitor.start_timing_context(correlation_id, "main_op")
 
-        # Start sub-operation
-        sub_context = performance_monitor.time_sub_operation(main_context, "sub_op_1")
-        assert "start_time" in sub_context
+        with performance_monitor.step(main_context, "sub_op_1") as s:
+            time.sleep(0.01)
+            s.meta(custom_metric="test_value", items_processed=5)
 
-        # Simulate work
-        time.sleep(0.01)
-
-        # End sub-operation with metadata
-        duration = performance_monitor.end_sub_operation(
-            main_context, "sub_op_1", sub_context,
-            custom_metric="test_value",
-            items_processed=5
-        )
-
-        assert duration > 5  # Should be at least 5ms
         assert "sub_op_1" in main_context["sub_operations"]
-        assert main_context["sub_operations"]["sub_op_1"]["duration_ms"] > 5
-        assert main_context["sub_operations"]["sub_op_1"]["custom_metric"] == "test_value"
-        assert main_context["sub_operations"]["sub_op_1"]["items_processed"] == 5
+        recorded = main_context["sub_operations"]["sub_op_1"]
+        assert recorded["duration_ms"] > 5
+        assert recorded["custom_metric"] == "test_value"
+        assert recorded["items_processed"] == 5
 
     def test_performance_threshold_alerting(self, performance_monitor):
-        """Test performance threshold monitoring and alerting."""
+        """Test performance threshold monitoring and alerting via step()."""
         # Mock logger to capture warnings
         with patch.object(performance_monitor.performance_logger, 'warning') as mock_warning:
             correlation_id = "threshold_test"
             context = performance_monitor.start_timing_context(correlation_id, "enhanced_conversation_response")
 
-            # Simulate slow sub-operation
-            sub_context = performance_monitor.time_sub_operation(context, "consciousness_generation")
+            # Exceed the 50ms context_extraction threshold
+            with performance_monitor.step(context, "context_extraction"):
+                time.sleep(0.06)
 
-            # Manually set duration to exceed threshold
-            sub_context["start_time"] = time.time() - 2.5  # 2.5 seconds ago
-
-            performance_monitor.end_sub_operation(context, "consciousness_generation", sub_context)
-
-            # Should trigger threshold warning (threshold is 2000ms)
             mock_warning.assert_called()
             warning_call = mock_warning.call_args[0][0]
-            assert "consciousness_generation exceeded threshold" in warning_call
-            assert "2000ms" in warning_call
+            assert "context_extraction exceeded threshold" in warning_call
+            assert "50ms" in warning_call
+
+    def test_step_reraises_and_records_error(self, performance_monitor):
+        """step() must record the error but re-raise — control flow belongs to the caller."""
+        context = performance_monitor.start_timing_context("err_test", "main_op")
+
+        with pytest.raises(ValueError, match="kaput"):
+            with performance_monitor.step(context, "boom") as s:
+                s.meta(partial=True)
+                raise ValueError("kaput")
+
+        recorded = context["sub_operations"]["boom"]
+        assert recorded["error"] == "kaput"
+        assert recorded["partial"] is True
+
+    def test_maybe_step_without_context(self, performance_monitor):
+        """maybe_step is a no-op recorder when there is no timing context."""
+        with maybe_step(performance_monitor, None, "anything") as s:
+            s.meta(x=1)
+
+        assert isinstance(s, _Step)
+        assert s.metadata == {"x": 1}
+
+    def test_maybe_step_with_context(self, performance_monitor):
+        """maybe_step delegates to step() when a timing context exists."""
+        context = performance_monitor.start_timing_context("maybe_test", "main_op")
+
+        with maybe_step(performance_monitor, context, "sub") as s:
+            s.meta(y=2)
+
+        assert context["sub_operations"]["sub"]["y"] == 2
 
     def test_total_response_time_threshold(self, performance_monitor):
         """Test total response time threshold monitoring."""
@@ -123,8 +139,8 @@ class TestConversationPerformanceMonitor:
             context = performance_monitor.start_timing_context(correlation_id, "test_operation")
 
             # Add some sub-operations
-            sub_context = performance_monitor.time_sub_operation(context, "sub_op")
-            performance_monitor.end_sub_operation(context, "sub_op", sub_context)
+            with performance_monitor.step(context, "sub_op"):
+                pass
 
             # Log error
             test_error = Exception("Test error message")
@@ -273,10 +289,8 @@ class TestEnhancedConversationServicePerformance:
         })
         mock_dependencies['state_influence_service'].build_conversation_context = AsyncMock(return_value={})
 
-        # Mock performance monitor
-        conversation_service.performance_monitor = Mock()
-        conversation_service.performance_monitor.time_sub_operation = Mock(return_value={"start_time": time.time()})
-        conversation_service.performance_monitor.end_sub_operation = Mock()
+        # Mock performance monitor (MagicMock so step() works as a context manager)
+        conversation_service.performance_monitor = MagicMock()
 
         # Test context gathering
         result = await conversation_service._gather_simulation_context_with_monitoring(
@@ -296,12 +310,11 @@ class TestEnhancedConversationServicePerformance:
         ]
 
         for operation in expected_operations:
-            conversation_service.performance_monitor.time_sub_operation.assert_any_call(
+            conversation_service.performance_monitor.step.assert_any_call(
                 {"correlation_id": "test_corr"}, operation
             )
 
-        # Verify end_sub_operation called for each
-        assert conversation_service.performance_monitor.end_sub_operation.call_count >= len(expected_operations)
+        assert conversation_service.performance_monitor.step.call_count >= len(expected_operations)
 
     @pytest.mark.asyncio
     async def test_response_generation_performance_breakdown(self, conversation_service, mock_dependencies):
@@ -327,12 +340,10 @@ class TestEnhancedConversationServicePerformance:
         mock_response = Mock()
         mock_response.choices = [Mock()]
         mock_response.choices[0].message.content = '{"message": "AI response", "emotion": "happy"}'
-        mock_dependencies['openai_client'].chat.completions.create = Mock(return_value=mock_response)
+        mock_dependencies['openai_client'].chat.completions.create = AsyncMock(return_value=mock_response)
 
-        # Mock performance monitor
-        conversation_service.performance_monitor = Mock()
-        conversation_service.performance_monitor.time_sub_operation = Mock(return_value={"start_time": time.time()})
-        conversation_service.performance_monitor.end_sub_operation = Mock()
+        # Mock performance monitor (MagicMock so step() works as a context manager)
+        conversation_service.performance_monitor = MagicMock()
 
         # Test response generation
         result = await conversation_service._generate_context_aware_response_with_monitoring(
@@ -351,7 +362,7 @@ class TestEnhancedConversationServicePerformance:
         ]
 
         for operation in expected_operations:
-            conversation_service.performance_monitor.time_sub_operation.assert_any_call(
+            conversation_service.performance_monitor.step.assert_any_call(
                 {"correlation_id": "test_corr"}, operation
             )
 
@@ -433,10 +444,8 @@ class TestEnhancedConversationServicePerformance:
             context = monitor.start_timing_context(correlation_id, "test_operation")
 
             # Simulate slow prompt construction (exceeds 200ms threshold)
-            sub_context = monitor.time_sub_operation(context, "prompt_construction")
-            sub_context["start_time"] = time.time() - 0.5  # 500ms ago
-
-            monitor.end_sub_operation(context, "prompt_construction", sub_context)
+            with monitor.step(context, "prompt_construction"):
+                time.sleep(0.25)
 
             # Should trigger threshold warning
             mock_warning.assert_called()
@@ -486,4 +495,4 @@ class TestConversationPerformanceIntegration:
 
         # Verify logger is configured for structured logging
         assert hasattr(monitor, 'performance_logger')
-        assert monitor.performance_logger.name == 'app.services.enhanced_conversation_service.performance'
+        assert monitor.performance_logger.name == 'app.services.conversation_performance.performance'
