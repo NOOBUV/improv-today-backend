@@ -328,12 +328,8 @@ class EnhancedConversationService:
 
             # Sub-sub-operation: Conversation sentiment analysis
             with maybe_step(self.performance_monitor, timing_context, "sentiment_analysis") as s:
-                conversation_sentiment_analysis = self._analyze_message_sentiment(user_message)
-                conversation_sentiment_score = conversation_sentiment_analysis.get("sentiment_score", 0.0)
-                s.meta(
-                    sentiment_score=conversation_sentiment_score,
-                    complexity=conversation_sentiment_analysis.get("complexity", "unknown")
-                )
+                conversation_sentiment_score = self._message_sentiment_score(user_message)
+                s.meta(sentiment_score=conversation_sentiment_score)
 
             # Sub-sub-operation: State influence calculation
             with maybe_step(self.performance_monitor, timing_context, "state_influence_calculation") as s:
@@ -687,68 +683,15 @@ class EnhancedConversationService:
         except Exception as e:
             logger.warning(f"Failed to track events mentioned: {str(e)}")
 
-    def _analyze_message_sentiment(self, user_message: str) -> Dict[str, Any]:
-        """
-        Analyze sentiment and input complexity for mood transition analysis and brevity enforcement.
-        Enhanced to identify personally resonant elements and input complexity for selective response.
-        Returns dict with sentiment score, complexity assessment, and response guidance.
+    def _message_sentiment_score(self, user_message: str) -> float:
+        """Sentiment of the user's message, -1.0 (negative) to 1.0 (positive).
+
+        Feeds StateInfluenceService.build_conversation_context - the only consumer.
         """
         try:
-            import re
-
-            # Input complexity detection for brevity enforcement
             words = user_message.strip().split()
-            word_count = len(words)
-            char_count = len(user_message.strip())
-
-            # Determine input complexity level
-            if word_count == 1 and char_count < 15:
-                complexity = "single_word"
-            elif word_count <= 3 or char_count < 30:
-                complexity = "fragment"
-            elif word_count <= 8 or char_count < 100:
-                complexity = "simple"
-            elif word_count <= 20 or char_count < 250:
-                complexity = "moderate"
-            else:
-                complexity = "complex"
-
             message_lower = user_message.lower().strip()
 
-            # Logical patterns for incomplete/ambiguous input detection
-            is_incomplete_input = False
-
-            if complexity in ["single_word", "fragment"]:
-                # Check if it's a complete thought using logical patterns
-                complete_patterns = [
-                    # Greetings
-                    r'\b(hi|hello|hey|yo|sup)\b',
-                    # Yes/No responses
-                    r'\b(yes|no|yeah|nah|yep|nope|sure|okay|ok)\b',
-                    # Exclamations that are complete
-                    r'\b(wow|cool|nice|great|awesome|thanks|bye)\b',
-                    # Questions that are complete even if short
-                    r'\bwhat\?|why\?|how\?|when\?|where\?|who\?',
-                    # Commands that are complete
-                    r'\b(stop|wait|go|help|start|continue)\b'
-                ]
-
-                is_complete_thought = any(re.search(pattern, message_lower) for pattern in complete_patterns)
-
-                # If it doesn't match complete patterns, it's likely incomplete
-                is_incomplete_input = not is_complete_thought
-
-            # Additional check for single words: most nouns without context are incomplete
-            if word_count == 1 and not is_incomplete_input:
-                single_word = message_lower
-                # These are typically incomplete when said alone
-                is_incomplete_input = (
-                    len(single_word) > 2 and
-                    single_word.isalpha() and
-                    single_word not in ["yes", "no", "hi", "bye", "ok", "wow", "cool", "nice", "thanks", "help"]
-                )
-
-            # Enhanced keyword analysis with personal resonance detection
             positive_keywords = [
                 "happy", "great", "awesome", "wonderful", "excited", "amazing", "love",
                 "fantastic", "brilliant", "perfect", "excellent", "good", "nice", "fun"
@@ -775,11 +718,9 @@ class EnhancedConversationService:
                 "exhausted", "can't sleep", "overthinking", "anxiety"
             ]
 
-            # Basic sentiment calculation
             positive_count = sum(1 for word in words if any(pos in word for pos in positive_keywords))
             negative_count = sum(1 for word in words if any(neg in word for neg in negative_keywords))
 
-            # Enhanced analysis for resonance detection
             romantic_score = sum(1 for phrase in romantic_indicators if phrase in message_lower)
             safety_score = sum(1 for phrase in safety_urgency if phrase in message_lower) * 3  # High priority
             interest_score = sum(1 for phrase in personal_interests if phrase in message_lower)
@@ -796,79 +737,16 @@ class EnhancedConversationService:
             elif positive_count == 0 and negative_count == 0:
                 sentiment_score = 0.1 if interest_score > 0 else 0.0
             else:
-                total_sentiment_words = positive_count + negative_count
-                if total_sentiment_words == 0:
-                    sentiment_score = 0.1 if interest_score > 0 else 0.0
-                else:
-                    # Calculate base sentiment with personal interest boost
-                    sentiment_score = (positive_count - negative_count) / total_sentiment_words
-                    if interest_score > 0:
-                        sentiment_score += 0.1  # Small boost for personal resonance
+                # Calculate base sentiment with personal interest boost
+                sentiment_score = (positive_count - negative_count) / (positive_count + negative_count)
+                if interest_score > 0:
+                    sentiment_score += 0.1  # Small boost for personal resonance
 
-            # Clamp to valid range
             sentiment_score = max(-1.0, min(1.0, sentiment_score))
 
-            # Generate response guidance based on complexity and content
-            response_guidance = {
-                "enforce_brevity": complexity in ["single_word", "fragment"],
-                "expected_response_words": self._get_expected_response_length(complexity, is_incomplete_input, safety_score > 0),
-                "requires_confusion": is_incomplete_input,
-                "priority_response": safety_score > 0,
-                "romantic_subtext": romantic_score > 0,
-                "personal_interest": interest_score > 0
-            }
-
-            analysis_result = {
-                "sentiment_score": sentiment_score,
-                "complexity": complexity,
-                "word_count": word_count,
-                "char_count": char_count,
-                "is_incomplete_input": is_incomplete_input,
-                "romantic_score": romantic_score,
-                "safety_score": safety_score,
-                "interest_score": interest_score,
-                "response_guidance": response_guidance
-            }
-
-            logger.debug(f"Enhanced sentiment analysis: '{user_message[:50]}...' -> {sentiment_score} complexity:{complexity} incomplete:{is_incomplete_input}")
-            return analysis_result
+            logger.debug(f"Sentiment: '{user_message[:50]}...' -> {sentiment_score}")
+            return sentiment_score
 
         except Exception as e:
             logger.error(f"Error analyzing message sentiment: {e}")
-            return {
-                "sentiment_score": 0.0,
-                "complexity": "simple",
-                "word_count": len(user_message.split()),
-                "char_count": len(user_message),
-                "is_incomplete_input": False,
-                "romantic_score": 0,
-                "safety_score": 0,
-                "interest_score": 0,
-                "response_guidance": {
-                    "enforce_brevity": False,
-                    "expected_response_words": "8-15",
-                    "requires_confusion": False,
-                    "priority_response": False,
-                    "romantic_subtext": False,
-                    "personal_interest": False
-                }
-            }
-
-    def _get_expected_response_length(self, complexity: str, is_incomplete_input: bool, is_urgent: bool) -> str:
-        """Determine expected response length based on input complexity."""
-        if is_urgent:
-            return "8-15"  # Urgent responses can be longer for clarity
-
-        if complexity == "single_word":
-            if is_incomplete_input:
-                return "1-5"  # Brief confusion: "Highway?" or "What about it?"
-            else:
-                return "3-8"  # Simple acknowledgment
-        elif complexity == "fragment":
-            return "3-10"  # Brief clarifying response
-        elif complexity == "simple":
-            return "8-15"  # Standard short response
-        elif complexity == "moderate":
-            return "12-25"  # Can be more detailed
-        else:  # complex
-            return "15-35"  # Full response allowed
+            return 0.0
