@@ -1,5 +1,5 @@
 """
-Enhanced Conversation Service for Story 2.6: Enhanced Conversational Context Integration.
+Clara Conversation Service: the conversation path behind /api/clara/conversation[/stream].
 Orchestrates context gathering from simulation, state, and character services.
 """
 import logging
@@ -29,9 +29,9 @@ FALLBACK_PERSONALITY_PROMPTS = {
 }
 
 
-class EnhancedConversationService:
+class ClaraConversationService:
     """
-    Enhanced conversation service that integrates simulation context with conversations.
+    Clara's conversation service: integrates simulation context with conversations.
 
     This service orchestrates:
     - Global state retrieval from StateManagerService

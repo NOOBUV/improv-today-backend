@@ -19,7 +19,7 @@ from app.schemas.clara import (
     ClaraStateCreate,
     ClaraStateUpdate
 )
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 from app.services.event_selection_service import EventSelectionService
 
 router = APIRouter()
@@ -45,7 +45,7 @@ async def conversation(
         logger.info(f"Processing conversation request for user {current_user.id}: {request.message[:100]}...")
 
         # Initialize services
-        enhanced_service = EnhancedConversationService()
+        enhanced_service = ClaraConversationService()
         event_service = EventSelectionService()
 
         # Handle conversation tracking with session_id
@@ -211,7 +211,7 @@ async def stream_conversation(
         logger.info(f"Processing streaming conversation request for user {current_user.id}: {request.message[:100]}...")
 
         # Initialize services (same as normal /conversation endpoint)
-        enhanced_service = EnhancedConversationService()
+        enhanced_service = ClaraConversationService()
         event_service = EventSelectionService()
 
         # Handle conversation tracking with session_id (same as normal endpoint)

@@ -7,7 +7,7 @@ import asyncio
 import time
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
 from app.services.conversation_performance import ConversationPerformanceMonitor, _Step, maybe_step
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 
 
 class TestConversationPerformanceMonitor:
@@ -156,8 +156,8 @@ class TestConversationPerformanceMonitor:
             assert "sub_operations_completed" in error_call_extra
 
 
-class TestEnhancedConversationServicePerformance:
-    """Test performance monitoring integration in EnhancedConversationService."""
+class TestClaraConversationServicePerformance:
+    """Test performance monitoring integration in ClaraConversationService."""
 
     @pytest.fixture
     def mock_dependencies(self):
@@ -174,9 +174,9 @@ class TestEnhancedConversationServicePerformance:
 
     @pytest.fixture
     def conversation_service(self, mock_dependencies):
-        """Create EnhancedConversationService with mocked dependencies."""
+        """Create ClaraConversationService with mocked dependencies."""
         with patch.multiple(
-            'app.services.enhanced_conversation_service',
+            'app.services.clara_conversation_service',
             CharacterContentService=Mock(return_value=mock_dependencies['character_content_service']),
             ConversationPromptService=Mock(return_value=mock_dependencies['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=mock_dependencies['state_influence_service']),
@@ -185,7 +185,7 @@ class TestEnhancedConversationServicePerformance:
             EventSelectionService=Mock(return_value=mock_dependencies['event_selection_service']),
             AsyncOpenAI=Mock(return_value=mock_dependencies['openai_client'])
         ):
-            service = EnhancedConversationService()
+            service = ClaraConversationService()
             # Replace mocked dependencies
             for key, value in mock_dependencies.items():
                 setattr(service, key, value)

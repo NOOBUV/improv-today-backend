@@ -1,13 +1,13 @@
 """
-Tests for EnhancedConversationService - Story 2.6 Enhanced Conversational Context Integration
+Tests for ClaraConversationService - Story 2.6 Enhanced Conversational Context Integration
 """
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 
 
-class TestEnhancedConversationService:
-    """Test suite for EnhancedConversationService functionality."""
+class TestClaraConversationService:
+    """Test suite for ClaraConversationService functionality."""
 
     @pytest.fixture
     def mock_services(self):
@@ -30,12 +30,12 @@ class TestEnhancedConversationService:
 
     @pytest.fixture
     def service(self, mock_services):
-        """Create EnhancedConversationService with mocked dependencies."""
-        with patch('app.services.enhanced_conversation_service.CharacterContentService') as mock_backstory, \
-             patch('app.services.enhanced_conversation_service.ConversationPromptService') as mock_prompt, \
-             patch('app.services.enhanced_conversation_service.StateInfluenceService') as mock_influence, \
-             patch('app.services.enhanced_conversation_service.StateManagerService') as mock_state, \
-             patch('app.services.enhanced_conversation_service.AsyncOpenAI') as mock_openai:
+        """Create ClaraConversationService with mocked dependencies."""
+        with patch('app.services.clara_conversation_service.CharacterContentService') as mock_backstory, \
+             patch('app.services.clara_conversation_service.ConversationPromptService') as mock_prompt, \
+             patch('app.services.clara_conversation_service.StateInfluenceService') as mock_influence, \
+             patch('app.services.clara_conversation_service.StateManagerService') as mock_state, \
+             patch('app.services.clara_conversation_service.AsyncOpenAI') as mock_openai:
 
             mock_backstory.return_value = mock_services['character_content_service']
             mock_prompt.return_value = mock_services['conversation_prompt_service']
@@ -43,7 +43,7 @@ class TestEnhancedConversationService:
             mock_state.return_value = mock_services['state_manager_service']
             mock_openai.return_value = mock_services['openai_client']
 
-            service = EnhancedConversationService()
+            service = ClaraConversationService()
             return service, mock_services
 
     @pytest.mark.asyncio
@@ -199,7 +199,7 @@ class TestEnhancedConversationService:
         mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
 
         # This should log a warning about exceeding threshold
-        with patch('app.services.enhanced_conversation_service.logger') as mock_logger:
+        with patch('app.services.clara_conversation_service.logger') as mock_logger:
             result = await enhanced_service.generate_enhanced_response(
                 user_message="Test",
                 user_id="user123",
@@ -400,7 +400,7 @@ class TestAwaitRegression:
         openai_client.chat.completions.create = AsyncMock(return_value=completion)
 
         with patch.multiple(
-            'app.services.enhanced_conversation_service',
+            'app.services.clara_conversation_service',
             CharacterContentService=Mock(return_value=deps['character_content_service']),
             ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=deps['state_influence_service']),
@@ -409,7 +409,7 @@ class TestAwaitRegression:
             EventSelectionService=Mock(return_value=deps['event_selection_service']),
             AsyncOpenAI=Mock(return_value=openai_client),
         ):
-            service = EnhancedConversationService()
+            service = ClaraConversationService()
         # Fallback must stay untouched on the enhanced path
         service._fallback_response = AsyncMock(return_value="FALLBACK")
         return service, deps, openai_client

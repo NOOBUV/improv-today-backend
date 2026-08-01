@@ -13,7 +13,7 @@ import json
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 
 
 def _chunk(text):
@@ -84,7 +84,7 @@ def hermetic_service():
     openai_client.chat.completions.create = AsyncMock(return_value=_FakeStream(CHUNKS))
 
     with patch.multiple(
-        'app.services.enhanced_conversation_service',
+        'app.services.clara_conversation_service',
         CharacterContentService=Mock(return_value=deps['character_content_service']),
         ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
         StateInfluenceService=Mock(return_value=deps['state_influence_service']),
@@ -93,7 +93,7 @@ def hermetic_service():
         EventSelectionService=Mock(return_value=deps['event_selection_service']),
         AsyncOpenAI=Mock(return_value=openai_client),
     ):
-        service = EnhancedConversationService()
+        service = ClaraConversationService()
     return service, deps, openai_client
 
 

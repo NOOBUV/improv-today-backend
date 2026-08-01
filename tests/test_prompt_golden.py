@@ -4,10 +4,10 @@ Golden-drift lock for prompt construction (refactor step 4).
 Proves the new single call
     construct_conversation_prompt_with_mood(..., recent_events=, global_state=, content_metadata=)
 is BYTE-IDENTICAL to the old two-step
-    construct_conversation_prompt_with_mood(...) + EnhancedConversationService._build_simulation_context_prompt(...)
+    construct_conversation_prompt_with_mood(...) + ClaraConversationService._build_simulation_context_prompt(...)
 
 _OLD_build_simulation_context_prompt is a verbatim copy of the pre-refactor
-EnhancedConversationService method (as of commit 0b50e84); OLD_CONCAT_SHA256 was
+ClaraConversationService method (as of commit 0b50e84); OLD_CONCAT_SHA256 was
 captured by running this file BEFORE the refactor.
 """
 import hashlib
