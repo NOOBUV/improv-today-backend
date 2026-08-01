@@ -214,7 +214,10 @@ class ClaraConversationService:
                 # by StreamingResponse into its key names.
                 logger.info(f"[{correlation_id}] Using fallback SSE stream")
                 return self._fallback_sse(
-                    user_message, conversation_history, personality, correlation_id
+                    user_message, conversation_history, personality, correlation_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    simulation_context=simulation_context
                 )
 
             with self.performance_monitor.step(timing_context, "fallback_response") as s:
@@ -705,7 +708,10 @@ class ClaraConversationService:
         user_message: str,
         conversation_history: Optional[str],
         personality: str,
-        correlation_id: str
+        correlation_id: str,
+        user_id: str,
+        conversation_id: str,
+        simulation_context: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
         """The fallback reply dressed as the normal SSE sequence.
 
@@ -728,6 +734,18 @@ class ClaraConversationService:
                 "chunk": text,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
+
+            # Same persist point as _respond_stream: history must carry the reply,
+            # not just the user turn that prompted it.
+            await self._persist_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                ai_response=text,
+                response_emotion=None,
+                correlation_id=correlation_id,
+                simulation_context=simulation_context,
+                fallback=True
+            )
 
             yield self._format_sse_event("processing_complete", {
                 "correlation_id": correlation_id,

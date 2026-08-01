@@ -179,3 +179,9 @@ async def test_fallback_stream_yields_sse_events_not_a_dict(hermetic_service):
     assert complete["response"] == fallback_text
     assert complete["fallback_mode"] is True
     assert complete["success"] is True
+
+    # The fallback reply is persisted too - history used to keep the user turn alone
+    stored = deps['session_state_service'].add_conversation_message.await_args_list[-1].kwargs
+    assert stored["message_type"] == "assistant"
+    assert stored["message_content"] == fallback_text
+    assert stored["metadata"]["fallback_mode"] is True
