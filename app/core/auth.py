@@ -36,16 +36,6 @@ async def get_current_user(token: str) -> dict:
     return await verify_token(token)
 
 
-def create_test_token(user_id: str = "test_user") -> str:
-    """
-    Create a test token for development/testing purposes.
-    """
-    from app.core.security import create_access_token
-    from datetime import timedelta
-
-    token_data = {"sub": user_id, "user_id": user_id}
-    return create_access_token(token_data, expires_delta=timedelta(hours=24))
-
 
 # Security scheme
 security = HTTPBearer()

@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, clara, subscriptions, state
+from app.api import clara, subscriptions, state
 from app.api.simulation import admin as simulation_admin
 from app.api.admin import journal as admin_journal
 from app.core.config import settings
@@ -33,7 +33,6 @@ app.add_middleware(
 app.add_middleware(SubscriptionMiddleware)
 
 # Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(clara.router, prefix="/api/clara", tags=["clara"])
 app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 
@@ -82,7 +81,6 @@ async def startup_event():
     # API endpoints ready
     logger.info("HTTP API endpoints available:")
     logger.info("  - /api/clara - Main conversation endpoint")
-    logger.info("  - /api/auth - Authentication")
 
     logger.info("ImprovToday backend startup complete")
 

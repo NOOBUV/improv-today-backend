@@ -3,17 +3,16 @@ Enhanced Conversation Service for Story 2.6: Enhanced Conversational Context Int
 Orchestrates context gathering from simulation, state, and character services.
 """
 import logging
-from typing import Dict, Any, Optional, List, AsyncGenerator, Union
+from typing import Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime, timezone
 import json
 import time
 import uuid
 import traceback
-import asyncio
 
 from app.core.conversation_config import conversation_config
 from app.services.contextual_backstory_service import ContextualBackstoryService
-from app.services.conversation_prompt_service import ConversationPromptService, EmotionType
+from app.services.conversation_prompt_service import ConversationPromptService
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
 from app.services.simulation.state_manager import StateManagerService
 from app.services.simple_openai import SimpleOpenAIService
