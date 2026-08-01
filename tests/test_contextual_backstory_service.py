@@ -1,14 +1,16 @@
 """
-Tests for ContextualBackstoryService - Story 2.6 Enhanced Conversational Context Integration
+Tests for CharacterContentService.select_relevant_content - Story 2.6 Enhanced
+Conversational Context Integration (backstory selection behavior).
 """
 import pytest
+from pathlib import Path
 from unittest.mock import Mock, patch
-from app.services.contextual_backstory_service import ContextualBackstoryService
+from app.services.character_content_service import CharacterContentService
 from app.core.conversation_config import ConversationContextConfig
 
 
-class TestContextualBackstoryService:
-    """Test suite for ContextualBackstoryService functionality."""
+class TestBackstorySelection:
+    """Test suite for contextual backstory selection functionality."""
 
     @pytest.fixture
     def mock_config(self):
@@ -26,17 +28,17 @@ class TestContextualBackstoryService:
 
     @pytest.fixture
     def service(self, mock_config):
-        """Create ContextualBackstoryService instance with mock dependencies."""
-        with patch('app.services.contextual_backstory_service.CharacterContentService'):
-            service = ContextualBackstoryService(mock_config)
-            return service
+        """Create CharacterContentService with file loading stubbed out."""
+        service = CharacterContentService(mock_config)
+        service._test_content = {}
+        service.load = Mock(side_effect=lambda t: service._test_content.get(t, ""))
+        return service
 
     @pytest.mark.asyncio
     async def test_keyword_matching_childhood(self, service):
         """Test keyword matching for childhood-related content."""
-        # Mock character content
-        service.character_service.load_childhood_memories.return_value = "Childhood content here..."
-        service.character_service.load_character_gist.return_value = "General character info..."
+        service._test_content["childhood_memories"] = "Childhood content here..."
+        service._test_content["character_gist"] = "General character info..."
 
         user_message = "Tell me about your childhood and your mother"
 
@@ -49,8 +51,8 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_keyword_matching_positive(self, service):
         """Test keyword matching for positive content."""
-        service.character_service.load_positive_memories.return_value = "Happy memories content..."
-        service.character_service.load_character_gist.return_value = "General character info..."
+        service._test_content["positive_memories"] = "Happy memories content..."
+        service._test_content["character_gist"] = "General character info..."
 
         user_message = "Tell me about your happiest memories and best experiences"
 
@@ -62,8 +64,8 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_keyword_matching_difficult(self, service):
         """Test keyword matching for difficult/trauma content."""
-        service.character_service.load_connecting_memories.return_value = "Difficult memories content..."
-        service.character_service.load_character_gist.return_value = "General character info..."
+        service._test_content["connecting_memories"] = "Difficult memories content..."
+        service._test_content["character_gist"] = "General character info..."
 
         user_message = "Tell me about difficult times and struggles in your life"
 
@@ -75,8 +77,8 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_keyword_matching_relationships(self, service):
         """Test keyword matching for relationship content."""
-        service.character_service.load_friend_character.return_value = "Friend character content..."
-        service.character_service.load_character_gist.return_value = "General character info..."
+        service._test_content["friend_character"] = "Friend character content..."
+        service._test_content["character_gist"] = "General character info..."
 
         user_message = "Tell me about your friends and relationships"
 
@@ -88,7 +90,7 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_general_fallback(self, service):
         """Test fallback to character gist for general queries."""
-        service.character_service.load_character_gist.return_value = "General character info..."
+        service._test_content["character_gist"] = "General character info..."
 
         user_message = "Tell me about yourself"
 
@@ -100,8 +102,7 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_content_length_limiting(self, service):
         """Test that content is properly limited by character count."""
-        long_content = "x" * 2000  # Content longer than limit
-        service.character_service.load_character_gist.return_value = long_content
+        service._test_content["character_gist"] = "x" * 2000  # Content longer than limit
 
         user_message = "Tell me about yourself"
         max_chars = 500
@@ -115,9 +116,9 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_multiple_keyword_matches(self, service):
         """Test handling of multiple keyword matches."""
-        service.character_service.load_childhood_memories.return_value = "Childhood content..."
-        service.character_service.load_positive_memories.return_value = "Happy content..."
-        service.character_service.load_character_gist.return_value = "General info..."
+        service._test_content["childhood_memories"] = "Childhood content..."
+        service._test_content["positive_memories"] = "Happy content..."
+        service._test_content["character_gist"] = "General info..."
 
         user_message = "Tell me about your happy childhood memories with your mother"
 
@@ -129,51 +130,25 @@ class TestContextualBackstoryService:
         assert len(result["content_types"]) >= 2
 
     @pytest.mark.asyncio
-    async def test_caching_functionality(self, service):
-        """Test that content is properly cached."""
-        service.character_service.load_character_gist.return_value = "Cached content..."
+    async def test_caching_functionality(self, mock_config):
+        """Test that content is only read from disk once."""
+        service = CharacterContentService(mock_config)
 
-        # First call should load content
-        await service.select_relevant_content("Tell me about yourself")
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(Path, "read_text", return_value="Cached content...") as mock_read:
+            # First call should load content
+            await service.select_relevant_content("Tell me about yourself")
 
-        # Second call should use cache
-        await service.select_relevant_content("Who are you?")
+            # Second call should use cache
+            await service.select_relevant_content("Who are you?")
 
-        # Character service should only be called once due to caching
-        assert service.character_service.load_character_gist.call_count == 1
-
-    def test_cache_status(self, service):
-        """Test cache status reporting."""
-        # Add some mock content to cache
-        service._content_cache["character_gist"] = "test content"
-
-        status = service.get_cache_status()
-
-        assert status["cached_content_types"] == ["character_gist"]
-        assert status["cache_size"] == 1
-        assert status["total_cached_chars"] == len("test content")
-
-    def test_clear_cache(self, service):
-        """Test cache clearing functionality."""
-        # Add some mock content to cache
-        service._content_cache["character_gist"] = "test content"
-
-        service.clear_cache()
-
-        assert service._content_cache == {}
-        status = service.get_cache_status()
-        assert status["cache_size"] == 0
+        # File should only be read once due to caching
+        assert mock_read.call_count == 1
 
     @pytest.mark.asyncio
     async def test_error_handling(self, service):
         """Test error handling when content loading fails gracefully."""
-        # Mock all character content methods to return None (simulating file not found)
-        service.character_service.load_character_gist.return_value = None
-        service.character_service.load_childhood_memories.return_value = None
-        service.character_service.load_positive_memories.return_value = None
-        service.character_service.load_connecting_memories.return_value = None
-        service.character_service.load_friend_character.return_value = None
-
+        # All content types return empty (simulating files not found)
         result = await service.select_relevant_content("Tell me about yourself")
 
         # Should return empty content but handle gracefully
@@ -184,8 +159,9 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_exception_fallback_behavior(self, service):
         """Test complete exception fallback with actual error."""
-        # Force a runtime exception in the main flow
+        # Force a runtime exception in the main flow and in fallback loading
         service._analyze_keyword_matches = Mock(side_effect=Exception("Critical error"))
+        service.load = Mock(side_effect=Exception("Critical error"))
 
         result = await service.select_relevant_content("Tell me about yourself")
 
@@ -196,7 +172,7 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_empty_message_handling(self, service):
         """Test handling of empty or None messages."""
-        service.character_service.load_character_gist.return_value = "General info..."
+        service._test_content["character_gist"] = "General info..."
 
         result = await service.select_relevant_content("")
 
@@ -206,8 +182,7 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_token_estimation(self, service):
         """Test token count estimation."""
-        content = "x" * 400  # 400 characters
-        service.character_service.load_character_gist.return_value = content
+        service._test_content["character_gist"] = "x" * 400  # 400 characters
 
         result = await service.select_relevant_content("Tell me about yourself")
 
@@ -218,10 +193,9 @@ class TestContextualBackstoryService:
     @pytest.mark.asyncio
     async def test_content_priority_ordering(self, service):
         """Test that content is selected based on priority ordering."""
-        # Mock all content types
-        service.character_service.load_character_gist.return_value = "Gist content"
-        service.character_service.load_childhood_memories.return_value = "Childhood content"
-        service.character_service.load_connecting_memories.return_value = "Trauma content"
+        service._test_content["character_gist"] = "Gist content"
+        service._test_content["childhood_memories"] = "Childhood content"
+        service._test_content["connecting_memories"] = "Trauma content"
 
         # Message that triggers multiple content types
         user_message = "Tell me about your difficult childhood experiences"
@@ -237,13 +211,13 @@ class TestContextualBackstoryService:
             assert connecting_index <= childhood_index  # Higher priority should come first or equal
 
 
-class TestContextualBackstoryServiceIntegration:
-    """Integration tests for ContextualBackstoryService with real CharacterContentService."""
+class TestBackstorySelectionIntegration:
+    """Integration tests for backstory selection with real content files."""
 
     @pytest.mark.asyncio
-    async def test_integration_with_real_character_service(self):
-        """Test integration with actual CharacterContentService (if content files exist)."""
-        service = ContextualBackstoryService()
+    async def test_integration_with_real_content(self):
+        """Test selection against actual content files (if they exist)."""
+        service = CharacterContentService()
 
         try:
             result = await service.select_relevant_content("Tell me about yourself")
@@ -262,11 +236,11 @@ class TestContextualBackstoryServiceIntegration:
     @pytest.mark.asyncio
     async def test_performance_with_large_content(self):
         """Test performance with realistic content sizes."""
-        service = ContextualBackstoryService()
+        service = CharacterContentService()
 
         # Mock large content
         large_content = "x" * 10000  # 10k characters
-        with patch.object(service.character_service, 'load_character_gist', return_value=large_content):
+        with patch.object(service, "load", return_value=large_content):
 
             import time
             start_time = time.time()

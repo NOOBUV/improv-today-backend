@@ -163,7 +163,7 @@ class TestEnhancedConversationServicePerformance:
     def mock_dependencies(self):
         """Mock all external dependencies."""
         return {
-            'contextual_backstory_service': Mock(),
+            'character_content_service': Mock(),
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
@@ -178,7 +178,7 @@ class TestEnhancedConversationServicePerformance:
         """Create EnhancedConversationService with mocked dependencies."""
         with patch.multiple(
             'app.services.enhanced_conversation_service',
-            ContextualBackstoryService=Mock(return_value=mock_dependencies['contextual_backstory_service']),
+            CharacterContentService=Mock(return_value=mock_dependencies['character_content_service']),
             ConversationPromptService=Mock(return_value=mock_dependencies['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=mock_dependencies['state_influence_service']),
             StateManagerService=Mock(return_value=mock_dependencies['state_manager_service']),
@@ -282,7 +282,7 @@ class TestEnhancedConversationServicePerformance:
         # Mock individual context gathering components
         mock_dependencies['state_manager_service'].get_current_global_state = AsyncMock(return_value={"mood": 60})
         mock_dependencies['event_selection_service'].get_contextual_events = AsyncMock(return_value=[])
-        mock_dependencies['contextual_backstory_service'].select_relevant_content = AsyncMock(return_value={
+        mock_dependencies['character_content_service'].select_relevant_content = AsyncMock(return_value={
             "char_count": 150,
             "content_types": ["background"],
             "content": "backstory content"

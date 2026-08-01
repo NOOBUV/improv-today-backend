@@ -9,7 +9,7 @@ import json
 import time
 
 from app.core.conversation_config import conversation_config
-from app.services.contextual_backstory_service import ContextualBackstoryService
+from app.services.character_content_service import CharacterContentService
 from app.services.conversation_performance import ConversationPerformanceMonitor, maybe_step
 from app.services.conversation_prompt_service import ConversationPromptService
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
@@ -30,14 +30,14 @@ class EnhancedConversationService:
     This service orchestrates:
     - Global state retrieval from StateManagerService
     - Recent simulation events using configurable time windows
-    - Intelligent backstory selection via ContextualBackstoryService
+    - Intelligent backstory selection via CharacterContentService
     - State influence calculation via StateInfluenceService
     - Enhanced prompt construction via ConversationPromptService
     """
 
     def __init__(self):
         self.config = conversation_config
-        self.contextual_backstory_service = ContextualBackstoryService(self.config)
+        self.character_content_service = CharacterContentService(self.config)
         self.conversation_prompt_service = ConversationPromptService()
         self.state_influence_service = StateInfluenceService()
         self.state_manager_service = StateManagerService()
@@ -324,7 +324,7 @@ class EnhancedConversationService:
 
             # Sub-sub-operation: Backstory content selection
             with maybe_step(self.performance_monitor, timing_context, "backstory_selection") as s:
-                backstory_context_data = await self.contextual_backstory_service.select_relevant_content(
+                backstory_context_data = await self.character_content_service.select_relevant_content(
                     user_message=user_message,
                     max_chars=int(self.config.MAX_BACKSTORY_CHARS * 0.6)
                 )

@@ -1,173 +1,269 @@
 """
-Character Content Service for loading Clara's backstory and character data.
+Character Content Service for Clara's backstory and character data.
+Loads character content from markdown files and selects contextually
+relevant backstory based on conversation keywords.
 """
-import os
-from typing import Dict, Optional
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from app.core.conversation_config import conversation_config
 
 logger = logging.getLogger(__name__)
 
 
 class CharacterContentService:
-    """Service for loading character content from markdown files."""
-    
-    def __init__(self):
+    """Loads character content and selects backstory relevant to the conversation."""
+
+    CONTENT_FILES = {  # {content_type: path relative to content/clara}
+        "character_gist": "clara-character-gist.md",
+        "connecting_memories": "development/generated-connecting-memories.md",
+        "childhood_memories": "development/childhood-memories.md",
+        "positive_memories": "development/positive-memories.md",
+        "friend_character": "development/friend-character.md",
+        "romantic_relationship": "development/romantic-relationship.md",
+    }
+
+    # Section headers for the consolidated backstory, in presentation order
+    _BACKSTORY_SECTIONS = [
+        ("character_gist", "# Character Overview"),
+        ("connecting_memories", "# Key Life Experiences"),
+        ("childhood_memories", "# Childhood Context"),
+        ("positive_memories", "# Positive Memories"),
+        ("friend_character", "# Important Relationships"),
+        ("romantic_relationship", "# Romantic Relationship History"),
+    ]
+
+    def __init__(self, config=None):
+        self.config = config or conversation_config
         # Base path to content directory
         self.content_base_path = Path(__file__).parent.parent.parent / "content" / "clara"
-        logger.info(f"Character content base path: {self.content_base_path}")
-    
-    def load_character_gist(self) -> str:
-        """Load Clara's character gist from clara-character-gist.md"""
-        try:
-            gist_path = self.content_base_path / "clara-character-gist.md"
-            if not gist_path.exists():
-                logger.error(f"Character gist file not found: {gist_path}")
-                return ""
-            
-            with open(gist_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            logger.info(f"Loaded character gist: {len(content)} characters")
-            return content
-            
-        except Exception as e:
-            logger.error(f"Error loading character gist: {str(e)}")
-            return ""
-    
-    def load_connecting_memories(self) -> str:
-        """Load detailed connecting memories from development folder"""
-        try:
-            memories_path = self.content_base_path / "development" / "generated-connecting-memories.md"
-            if not memories_path.exists():
-                logger.error(f"Connecting memories file not found: {memories_path}")
-                return ""
-            
-            with open(memories_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            logger.info(f"Loaded connecting memories: {len(content)} characters")
-            return content
-            
-        except Exception as e:
-            logger.error(f"Error loading connecting memories: {str(e)}")
-            return ""
-    
-    def load_childhood_memories(self) -> str:
-        """Load childhood memories from development folder"""
-        try:
-            childhood_path = self.content_base_path / "development" / "childhood-memories.md"
-            if not childhood_path.exists():
-                logger.warning(f"Childhood memories file not found: {childhood_path}")
-                return ""
-            
-            with open(childhood_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            logger.info(f"Loaded childhood memories: {len(content)} characters")
-            return content
-            
-        except Exception as e:
-            logger.error(f"Error loading childhood memories: {str(e)}")
-            return ""
-    
-    def load_positive_memories(self) -> str:
-        """Load positive memories from development folder"""
-        try:
-            positive_path = self.content_base_path / "development" / "positive-memories.md"
-            if not positive_path.exists():
-                logger.warning(f"Positive memories file not found: {positive_path}")
-                return ""
-            
-            with open(positive_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            logger.info(f"Loaded positive memories: {len(content)} characters")
-            return content
-            
-        except Exception as e:
-            logger.error(f"Error loading positive memories: {str(e)}")
-            return ""
-    
-    def load_friend_character(self) -> str:
-        """Load friend character details from development folder"""
-        try:
-            friend_path = self.content_base_path / "development" / "friend-character.md"
-            if not friend_path.exists():
-                logger.warning(f"Friend character file not found: {friend_path}")
-                return ""
 
-            with open(friend_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            logger.info(f"Loaded friend character: {len(content)} characters")
-            return content
-
-        except Exception as e:
-            logger.error(f"Error loading friend character: {str(e)}")
-            return ""
-
-    def load_romantic_relationship(self) -> str:
-        """Load romantic relationship details from development folder"""
-        try:
-            romantic_path = self.content_base_path / "development" / "romantic-relationship.md"
-            if not romantic_path.exists():
-                logger.warning(f"Romantic relationship file not found: {romantic_path}")
-                return ""
-
-            with open(romantic_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            logger.info(f"Loaded romantic relationship: {len(content)} characters")
-            return content
-
-        except Exception as e:
-            logger.error(f"Error loading romantic relationship: {str(e)}")
-            return ""
-    
-    def load_all_character_content(self) -> Dict[str, str]:
-        """Load all character content and return as dictionary"""
-        content = {
-            "character_gist": self.load_character_gist(),
-            "connecting_memories": self.load_connecting_memories(),
-            "childhood_memories": self.load_childhood_memories(),
-            "positive_memories": self.load_positive_memories(),
-            "friend_character": self.load_friend_character(),
-            "romantic_relationship": self.load_romantic_relationship()
+        # Keyword mapping for content selection
+        self.content_keywords = {
+            "childhood": [
+                "childhood", "child", "young", "mother", "mom", "family", "growing up",
+                "when I was little", "parents", "siblings", "school", "elementary",
+                "kindergarten", "teenage", "teenager", "high school"
+            ],
+            "positive": [
+                "happy", "best", "favorite", "wonderful", "amazing", "love", "joy",
+                "good times", "celebration", "success", "achievement", "proud",
+                "excited", "thrilled", "delighted", "grateful", "blessed"
+            ],
+            "difficult": [
+                "sad", "difficult", "hard", "worst", "dreadful", "tough", "struggle",
+                "pain", "loss", "grief", "hurt", "trauma", "depression", "anxiety",
+                "stress", "overwhelmed", "breakdown", "crisis", "failure"
+            ],
+            "relationships": [
+                "friends", "friend", "people", "someone", "relationship", "social",
+                "together", "dating", "boyfriend", "girlfriend", "romantic", "love",
+                "breakup", "marriage", "partner", "friendship", "connection"
+            ],
+            "work": [
+                "work", "job", "career", "office", "colleague", "professional",
+                "deadline", "project", "boss", "manager", "workplace", "employment",
+                "interview", "promotion", "business", "company"
+            ],
+            "general": [
+                "yourself", "who are you", "tell me about", "what are you like",
+                "describe yourself", "background", "story", "personality", "character"
+            ]
         }
 
-        # Log summary
-        total_chars = sum(len(v) for v in content.values() if v)
-        logger.info(f"Loaded complete character content: {total_chars} total characters")
+        # Content loading cache to minimize file I/O
+        self._content_cache = {}
 
+    def load(self, content_type: str) -> str:
+        """Load a content file by type, with instance caching."""
+        if content_type in self._content_cache:
+            return self._content_cache[content_type]
+
+        relative_path = self.CONTENT_FILES.get(content_type)
+        if relative_path is None:
+            logger.error(f"Unknown content type: {content_type}")
+            return ""
+
+        path = self.content_base_path / relative_path
+        try:
+            if not path.exists():
+                logger.warning(f"Content file not found: {path}")
+                return ""
+            content = path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Error loading {content_type}: {str(e)}")
+            return ""
+
+        if content:
+            self._content_cache[content_type] = content
+            logger.debug(f"Loaded and cached {content_type}: {len(content)} characters")
         return content
-    
+
     def get_consolidated_backstory(self) -> str:
         """Get consolidated backstory for LLM prompts"""
-        content = self.load_all_character_content()
-
-        # Build consolidated backstory
         backstory_parts = []
-
-        if content["character_gist"]:
-            backstory_parts.append("# Character Overview\n" + content["character_gist"])
-
-        if content["connecting_memories"]:
-            backstory_parts.append("# Key Life Experiences\n" + content["connecting_memories"])
-
-        if content["childhood_memories"]:
-            backstory_parts.append("# Childhood Context\n" + content["childhood_memories"])
-
-        if content["positive_memories"]:
-            backstory_parts.append("# Positive Memories\n" + content["positive_memories"])
-
-        if content["friend_character"]:
-            backstory_parts.append("# Important Relationships\n" + content["friend_character"])
-
-        if content["romantic_relationship"]:
-            backstory_parts.append("# Romantic Relationship History\n" + content["romantic_relationship"])
+        for content_type, header in self._BACKSTORY_SECTIONS:
+            content = self.load(content_type)
+            if content:
+                backstory_parts.append(f"{header}\n{content}")
 
         consolidated = "\n\n".join(backstory_parts)
         logger.info(f"Consolidated backstory: {len(consolidated)} characters")
-
         return consolidated
+
+    async def select_relevant_content(
+        self,
+        user_message: str,
+        conversation_history: Optional[str] = None,
+        max_chars: Optional[int] = None
+    ) -> Dict:
+        """
+        Select relevant backstory content based on user message keywords.
+
+        Args:
+            user_message: The user's message to analyze for context
+            conversation_history: Optional conversation history for additional context
+            max_chars: Maximum character limit for selected content
+
+        Returns:
+            Dictionary containing selected content and metadata
+        """
+        try:
+            logger.info(f"Selecting relevant content for message: '{user_message[:50]}...'")
+
+            message_lower = user_message.lower()
+            selected_content = []
+            content_types = []
+            selection_reasoning = []
+
+            # Analyze for keyword matches and select content
+            keyword_matches = self._analyze_keyword_matches(message_lower)
+
+            # Select content based on keyword matches and priorities
+            for content_type, match_count in keyword_matches.items():
+                if match_count > 0:
+                    content = self.load(content_type)
+                    if content:
+                        selected_content.append(content)
+                        content_types.append(content_type)
+                        selection_reasoning.append(f"{content_type}: {match_count} keyword matches")
+
+            # Default fallback to character gist for general queries or no matches
+            if not selected_content or any(kw in message_lower for kw in self.content_keywords["general"]):
+                gist_content = self.load("character_gist")
+                if gist_content and "character_gist" not in content_types:
+                    selected_content.append(gist_content)
+                    content_types.append("character_gist")
+                    selection_reasoning.append("character_gist: fallback for general query")
+
+            # Combine and limit content for token efficiency
+            combined_content = self._combine_and_limit_content(
+                selected_content,
+                max_chars or self.config.MAX_BACKSTORY_CHARS
+            )
+
+            result = {
+                "content": combined_content["content"],
+                "content_types": content_types,
+                "char_count": combined_content["char_count"],
+                "estimated_tokens": combined_content["estimated_tokens"],
+                "char_limit_used": max_chars or self.config.MAX_BACKSTORY_CHARS,
+                "selection_reasoning": "; ".join(selection_reasoning),
+                "keyword_matches": keyword_matches,
+                "truncated": combined_content["truncated"]
+            }
+
+            logger.info(f"Selected content: {len(content_types)} types, {result['char_count']} chars, {result['estimated_tokens']} tokens")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error selecting relevant content: {str(e)}")
+            # Return fallback content
+            return self._get_fallback_content(max_chars)
+
+    def _analyze_keyword_matches(self, message_lower: str) -> Dict[str, int]:
+        """Analyze message for keyword matches and return match counts by content type."""
+        keyword_matches = {}
+
+        for content_type, keywords in self.content_keywords.items():
+            # Skip 'general' as it's handled separately
+            if content_type == "general":
+                continue
+
+            match_count = sum(1 for keyword in keywords if keyword in message_lower)
+
+            # Map content types to actual content types
+            content_type_mapping = {
+                "childhood": "childhood_memories",
+                "positive": "positive_memories",
+                "difficult": "connecting_memories",
+                "relationships": "friend_character",
+                "work": "character_gist"  # Work-related falls back to general character info
+            }
+
+            mapped_type = content_type_mapping.get(content_type, content_type)
+            keyword_matches[mapped_type] = match_count
+
+        # Sort by priority and match count
+        sorted_matches = {}
+        for content_type in sorted(keyword_matches.keys(),
+                                 key=lambda x: (self.config.CONTENT_TYPE_PRIORITIES.get(x, 0), keyword_matches[x]),
+                                 reverse=True):
+            sorted_matches[content_type] = keyword_matches[content_type]
+
+        return sorted_matches
+
+    def _combine_and_limit_content(self, content_list: List[str], char_limit: int) -> Dict:
+        """Combine content pieces and apply character limit."""
+        combined_content = "\n\n".join(filter(None, content_list))
+        truncated = False
+
+        if len(combined_content) > char_limit:
+            combined_content = combined_content[:char_limit-3] + "..."
+            truncated = True
+
+        return {
+            "content": combined_content,
+            "char_count": len(combined_content),
+            "estimated_tokens": len(combined_content) // 4,  # Rough estimation: 4 chars per token
+            "truncated": truncated
+        }
+
+    def _get_fallback_content(self, max_chars: Optional[int] = None) -> Dict:
+        """Get fallback content when selection fails."""
+        try:
+            gist_content = self.load("character_gist")
+            if not gist_content:
+                gist_content = "Ava is a 22-year-old creative strategist with a dry wit and observant nature."
+
+            char_limit = max_chars or self.config.MAX_BACKSTORY_CHARS
+            limited_content = self._combine_and_limit_content([gist_content], char_limit)
+
+            return {
+                "content": limited_content["content"],
+                "content_types": ["character_gist"],
+                "char_count": limited_content["char_count"],
+                "estimated_tokens": limited_content["estimated_tokens"],
+                "char_limit_used": char_limit,
+                "selection_reasoning": "fallback due to error",
+                "keyword_matches": {},
+                "truncated": limited_content["truncated"],
+                "fallback_mode": True
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting fallback content: {str(e)}")
+            # Return minimal fallback
+            return {
+                "content": "Ava is a 22-year-old creative strategist.",
+                "content_types": ["minimal_fallback"],
+                "char_count": 43,
+                "estimated_tokens": 11,
+                "char_limit_used": max_chars or self.config.MAX_BACKSTORY_CHARS,
+                "selection_reasoning": "minimal fallback due to system error",
+                "keyword_matches": {},
+                "truncated": False,
+                "fallback_mode": True,
+                "error": str(e)
+            }

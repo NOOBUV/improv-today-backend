@@ -13,7 +13,7 @@ class TestEnhancedConversationService:
     def mock_services(self):
         """Mock all dependent services."""
         mocks = {
-            'contextual_backstory_service': Mock(),
+            'character_content_service': Mock(),
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
@@ -22,7 +22,7 @@ class TestEnhancedConversationService:
         }
 
         # Setup async methods
-        mocks['contextual_backstory_service'].select_relevant_content = AsyncMock()
+        mocks['character_content_service'].select_relevant_content = AsyncMock()
         mocks['state_influence_service'].build_conversation_context = AsyncMock()
         mocks['state_manager_service'].get_current_global_state = AsyncMock()
         mocks['state_manager_service'].get_recent_events = AsyncMock()
@@ -33,14 +33,14 @@ class TestEnhancedConversationService:
     @pytest.fixture
     def service(self, mock_services):
         """Create EnhancedConversationService with mocked dependencies."""
-        with patch('app.services.enhanced_conversation_service.ContextualBackstoryService') as mock_backstory, \
+        with patch('app.services.enhanced_conversation_service.CharacterContentService') as mock_backstory, \
              patch('app.services.enhanced_conversation_service.ConversationPromptService') as mock_prompt, \
              patch('app.services.enhanced_conversation_service.StateInfluenceService') as mock_influence, \
              patch('app.services.enhanced_conversation_service.StateManagerService') as mock_state, \
              patch('app.services.enhanced_conversation_service.SimpleOpenAIService') as mock_simple, \
              patch('app.services.enhanced_conversation_service.AsyncOpenAI') as mock_openai:
 
-            mock_backstory.return_value = mock_services['contextual_backstory_service']
+            mock_backstory.return_value = mock_services['character_content_service']
             mock_prompt.return_value = mock_services['conversation_prompt_service']
             mock_influence.return_value = mock_services['state_influence_service']
             mock_state.return_value = mock_services['state_manager_service']
@@ -67,7 +67,7 @@ class TestEnhancedConversationService:
                 "hours_ago": 2
             }
         ]
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Character backstory content",
             "content_types": ["character_gist"],
             "char_count": 500,
@@ -146,7 +146,7 @@ class TestEnhancedConversationService:
 
         mocks['state_manager_service'].get_current_global_state.side_effect = delayed_global_state
         mocks['state_manager_service'].get_recent_events.side_effect = delayed_events
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": ["character_gist"],
             "char_count": 100,
@@ -188,7 +188,7 @@ class TestEnhancedConversationService:
         # Setup mock responses
         mocks['state_manager_service'].get_current_global_state.return_value = {}
         mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": [],
             "char_count": 0,
@@ -246,7 +246,7 @@ class TestEnhancedConversationService:
                 "impact_mood": "positive"
             }
         ]
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Ava loves creative projects and collaboration",
             "content_types": ["positive_memories", "character_gist"],
             "char_count": 800,
@@ -289,7 +289,7 @@ class TestEnhancedConversationService:
         # Make everything fail except fallback
         mocks['state_manager_service'].get_current_global_state.side_effect = Exception("DB error")
         mocks['state_manager_service'].get_recent_events.side_effect = Exception("DB error")
-        mocks['contextual_backstory_service'].select_relevant_content.side_effect = Exception("File error")
+        mocks['character_content_service'].select_relevant_content.side_effect = Exception("File error")
         mocks['state_influence_service'].build_conversation_context.side_effect = Exception("Context error")
 
         # Setup working fallback
@@ -327,7 +327,7 @@ class TestEnhancedConversationService:
         # Setup mocks
         mocks['state_manager_service'].get_current_global_state.return_value = {}
         mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": [],
             "char_count": 100,
@@ -373,7 +373,7 @@ class TestAwaitRegression:
     @pytest.fixture
     def hermetic_service(self):
         deps = {
-            'contextual_backstory_service': Mock(
+            'character_content_service': Mock(
                 select_relevant_content=AsyncMock(return_value={
                     "content": "backstory", "content_types": ["character_gist"],
                     "char_count": 9, "estimated_tokens": 3,
@@ -416,7 +416,7 @@ class TestAwaitRegression:
 
         with patch.multiple(
             'app.services.enhanced_conversation_service',
-            ContextualBackstoryService=Mock(return_value=deps['contextual_backstory_service']),
+            CharacterContentService=Mock(return_value=deps['character_content_service']),
             ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=deps['state_influence_service']),
             StateManagerService=Mock(return_value=deps['state_manager_service']),
