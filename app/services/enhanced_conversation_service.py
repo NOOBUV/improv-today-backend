@@ -823,7 +823,7 @@ class EnhancedConversationService:
             if timing_context:
                 openai_context = self.performance_monitor.time_sub_operation(timing_context, "openai_api_call")
 
-            response = self.openai_client.chat.completions.create(
+            response = await self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": enhanced_prompt},

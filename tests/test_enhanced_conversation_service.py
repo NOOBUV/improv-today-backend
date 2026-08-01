@@ -38,7 +38,7 @@ class TestEnhancedConversationService:
              patch('app.services.enhanced_conversation_service.StateInfluenceService') as mock_influence, \
              patch('app.services.enhanced_conversation_service.StateManagerService') as mock_state, \
              patch('app.services.enhanced_conversation_service.SimpleOpenAIService') as mock_simple, \
-             patch('app.services.enhanced_conversation_service.OpenAI') as mock_openai:
+             patch('app.services.enhanced_conversation_service.AsyncOpenAI') as mock_openai:
 
             mock_backstory.return_value = mock_services['contextual_backstory_service']
             mock_prompt.return_value = mock_services['conversation_prompt_service']
@@ -425,3 +425,88 @@ class TestEnhancedConversationService:
             scenario=mocks['state_influence_service'].build_conversation_context.call_args[1]["scenario"],
             user_preferences=user_preferences
         )
+
+
+class TestAwaitRegression:
+    """Regression lock for the missing-await bug: the non-streaming path must
+    return enhanced output, not silently degrade to the fallback service.
+
+    Hermetic: every constructor dependency is patched."""
+
+    @pytest.fixture
+    def hermetic_service(self):
+        deps = {
+            'contextual_backstory_service': Mock(
+                select_relevant_content=AsyncMock(return_value={
+                    "content": "backstory", "content_types": ["character_gist"],
+                    "char_count": 9, "estimated_tokens": 3,
+                })
+            ),
+            'conversation_prompt_service': Mock(),
+            'state_influence_service': Mock(
+                build_conversation_context=AsyncMock(return_value={"mood_influence": {"tone": "warm"}})
+            ),
+            'state_manager_service': Mock(
+                get_current_global_state=AsyncMock(return_value={
+                    "mood": {"numeric_value": 70}, "stress": {"numeric_value": 30},
+                    "energy": {"numeric_value": 60},
+                })
+            ),
+            'mood_transition_analyzer': Mock(),
+            'simple_openai_service': Mock(generate_coaching_response=AsyncMock()),
+            'dynamic_content_selector': Mock(),
+            'session_state_service': Mock(
+                add_conversation_message=AsyncMock(),
+                get_conversation_history=AsyncMock(return_value=[]),
+            ),
+            'event_selection_service': Mock(
+                get_contextual_events=AsyncMock(return_value=[
+                    {"id": "ev1", "summary": "Had coffee with Mel", "hours_ago": 3}
+                ]),
+                mark_events_used=AsyncMock(),
+            ),
+        }
+        emotion = Mock()
+        emotion.value = "happy"
+        deps['conversation_prompt_service'].select_conversation_emotion_with_mood.return_value = (
+            emotion, "user is upbeat"
+        )
+        deps['conversation_prompt_service'].construct_conversation_prompt_with_mood.return_value = "BASE PROMPT"
+
+        openai_client = Mock()
+        completion = Mock()
+        completion.choices = [Mock()]
+        completion.choices[0].message.content = '{"message": "hi", "emotion": "happy"}'
+        openai_client.chat.completions.create = AsyncMock(return_value=completion)
+
+        with patch.multiple(
+            'app.services.enhanced_conversation_service',
+            ContextualBackstoryService=Mock(return_value=deps['contextual_backstory_service']),
+            ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
+            StateInfluenceService=Mock(return_value=deps['state_influence_service']),
+            StateManagerService=Mock(return_value=deps['state_manager_service']),
+            MoodTransitionAnalyzer=Mock(return_value=deps['mood_transition_analyzer']),
+            SimpleOpenAIService=Mock(return_value=deps['simple_openai_service']),
+            DynamicContentSelector=Mock(return_value=deps['dynamic_content_selector']),
+            SessionStateService=Mock(return_value=deps['session_state_service']),
+            EventSelectionService=Mock(return_value=deps['event_selection_service']),
+            AsyncOpenAI=Mock(return_value=openai_client),
+        ):
+            service = EnhancedConversationService()
+        return service, deps, openai_client
+
+    @pytest.mark.asyncio
+    async def test_non_streaming_returns_enhanced_not_fallback(self, hermetic_service):
+        service, deps, openai_client = hermetic_service
+
+        result = await service.generate_enhanced_response(
+            user_message="How was your day?",
+            user_id="user123",
+            conversation_id="conv789",
+        )
+
+        assert result["enhanced_mode"] is True
+        assert result["fallback_mode"] is False
+        assert result["ai_response"] == "hi"
+        openai_client.chat.completions.create.assert_awaited_once()
+        deps['simple_openai_service'].generate_coaching_response.assert_not_called()

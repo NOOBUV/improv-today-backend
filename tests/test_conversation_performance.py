@@ -173,7 +173,7 @@ class TestEnhancedConversationServicePerformance:
             DynamicContentSelector=Mock(return_value=mock_dependencies['dynamic_content_selector']),
             SessionStateService=Mock(return_value=mock_dependencies['session_state_service']),
             EventSelectionService=Mock(return_value=mock_dependencies['event_selection_service']),
-            OpenAI=Mock(return_value=mock_dependencies['openai_client'])
+            AsyncOpenAI=Mock(return_value=mock_dependencies['openai_client'])
         ):
             service = EnhancedConversationService()
             # Replace mocked dependencies
