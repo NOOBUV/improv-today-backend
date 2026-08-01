@@ -529,8 +529,10 @@ async def get_subscription_status(
     Get the current subscription status for the authenticated user.
     """
     try:
-        return await subscription_service.check_user_subscription_status(db, current_user.id)
-        
+        # check_user_subscription_status is sync — a stray await here made this
+        # endpoint 500 on every request (TypeError swallowed by the except)
+        return subscription_service.check_user_subscription_status(db, current_user.id)
+
     except Exception as e:
         logger.error(f"Failed to get subscription status for user {current_user.id}: {str(e)}")
         raise HTTPException(
