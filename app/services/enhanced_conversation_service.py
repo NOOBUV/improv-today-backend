@@ -14,13 +14,19 @@ from app.services.conversation_performance import ConversationPerformanceMonitor
 from app.services.conversation_prompt_service import ConversationPromptService
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
 from app.services.simulation.state_manager import StateManagerService
-from app.services.simple_openai import SimpleOpenAIService
 from app.services.session_state_service import SessionStateService
 from app.services.event_selection_service import EventSelectionService
 from app.core.config import settings
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+# Voice options for the fallback path only (the enhanced path builds its own prompt).
+FALLBACK_PERSONALITY_PROMPTS = {
+    "sassy_english": "You are a witty, sassy English conversation partner with a charming British accent in your responses. Be playful, slightly cheeky, but encouraging.",
+    "blunt_american": "You are a direct, no-nonsense American conversation partner. Be straightforward, honest, and practical while remaining supportive.",
+    "friendly_neutral": "You are a warm, encouraging conversation partner. Be supportive, patient, and genuinely interested in the conversation.",
+}
 
 
 class EnhancedConversationService:
@@ -41,7 +47,6 @@ class EnhancedConversationService:
         self.conversation_prompt_service = ConversationPromptService()
         self.state_influence_service = StateInfluenceService()
         self.state_manager_service = StateManagerService()
-        self.simple_openai_service = SimpleOpenAIService()
         self.session_state_service = SessionStateService()
         self.event_selection_service = EventSelectionService()
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
@@ -204,16 +209,22 @@ class EnhancedConversationService:
                     logger.warning(f"[{correlation_id}] Enhanced response generation failed: {str(e)}")
 
             # Sub-operation 5: Fallback response generation
+            if stream:
+                # stream=True must hand back a generator; a dict here would be iterated
+                # by StreamingResponse into its key names.
+                logger.info(f"[{correlation_id}] Using fallback SSE stream")
+                return self._fallback_sse(
+                    user_message, conversation_history, personality, correlation_id
+                )
+
             with self.performance_monitor.step(timing_context, "fallback_response") as s:
                 logger.info(f"[{correlation_id}] Using fallback response generation")
-                fallback_response = await self.simple_openai_service.generate_coaching_response(
-                    message=user_message,
-                    conversation_history=conversation_history or "",
-                    personality=personality
+                fallback_text = await self._fallback_response(
+                    user_message, conversation_history, personality
                 )
 
                 s.meta(
-                    response_length=len(fallback_response.ai_response),
+                    response_length=len(fallback_text),
                     fallback_mode=True
                 )
 
@@ -225,8 +236,8 @@ class EnhancedConversationService:
                 self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
 
                 result = {
-                    "ai_response": fallback_response.ai_response,
-                    "corrected_transcript": fallback_response.corrected_transcript,
+                    "ai_response": fallback_text,
+                    "corrected_transcript": user_message,
                     "simulation_context": simulation_context,
                     "selected_backstory_types": [],
                     "fallback_mode": True,
@@ -239,7 +250,7 @@ class EnhancedConversationService:
                 await self._persist_turn(
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    ai_response=fallback_response.ai_response,
+                    ai_response=fallback_text,
                     response_emotion=None,
                     correlation_id=correlation_id,
                     simulation_context=simulation_context,
@@ -644,6 +655,96 @@ class EnhancedConversationService:
 
         except Exception as e:
             logger.error(f"Streaming response failed: {str(e)}")
+            yield self._format_sse_event("error", {
+                "correlation_id": correlation_id,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+    async def _fallback_response(
+        self,
+        user_message: str,
+        conversation_history: Optional[str],
+        personality: str = "friendly_neutral"
+    ) -> str:
+        """Clara's plain reply when the enhanced path is unavailable.
+
+        No simulation context, no JSON envelope - just a line in character.
+        """
+        if self.openai_client is None:
+            message_lower = user_message.lower()
+            if "name is" in message_lower or "i'm" in message_lower or "i am" in message_lower:
+                return "Nice to meet you! I'd love to know more about you. What do you enjoy doing in your free time?"
+            if "?" in user_message:
+                return "That's a great question! What do you think about it yourself?"
+            return "That's really interesting! Can you tell me more about that?"
+
+        base_prompt = FALLBACK_PERSONALITY_PROMPTS.get(
+            personality, FALLBACK_PERSONALITY_PROMPTS["friendly_neutral"]
+        )
+        history_context = f"\n\nRecent conversation:\n{conversation_history}" if conversation_history else ""
+
+        response = await self.openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": (
+                    f"{base_prompt}\n\n"
+                    "You are Clara. Reply in character as plain text (no JSON), "
+                    "1-2 conversational sentences, and ask a follow-up question."
+                    f"{history_context}"
+                )},
+                {"role": "user", "content": user_message}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        return (response.choices[0].message.content or "").strip()
+
+    async def _fallback_sse(
+        self,
+        user_message: str,
+        conversation_history: Optional[str],
+        personality: str,
+        correlation_id: str
+    ) -> AsyncGenerator[str, None]:
+        """The fallback reply dressed as the normal SSE sequence.
+
+        Yields: processing_start -> one consciousness_chunk (whole text) -> processing_complete.
+        The client parses the same events either way.
+        """
+        start_time = time.time()
+
+        try:
+            yield self._format_sse_event("processing_start", {
+                "correlation_id": correlation_id,
+                "status": "starting",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            text = await self._fallback_response(user_message, conversation_history, personality)
+
+            yield self._format_sse_event("consciousness_chunk", {
+                "correlation_id": correlation_id,
+                "chunk": text,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            yield self._format_sse_event("processing_complete", {
+                "correlation_id": correlation_id,
+                "response": text,
+                "simulation_context": {
+                    "conversation_emotion": None,
+                    "global_mood": None,
+                    "recent_events_count": 0
+                },
+                "performance_metrics": {"total_duration_ms": (time.time() - start_time) * 1000},
+                "fallback_mode": True,
+                "success": True,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Fallback stream failed: {str(e)}")
             yield self._format_sse_event("error", {
                 "correlation_id": correlation_id,
                 "error": str(e),

@@ -167,7 +167,6 @@ class TestEnhancedConversationServicePerformance:
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
-            'simple_openai_service': Mock(),
             'session_state_service': Mock(),
             'event_selection_service': Mock(),
             'openai_client': Mock()
@@ -182,7 +181,6 @@ class TestEnhancedConversationServicePerformance:
             ConversationPromptService=Mock(return_value=mock_dependencies['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=mock_dependencies['state_influence_service']),
             StateManagerService=Mock(return_value=mock_dependencies['state_manager_service']),
-            SimpleOpenAIService=Mock(return_value=mock_dependencies['simple_openai_service']),
             SessionStateService=Mock(return_value=mock_dependencies['session_state_service']),
             EventSelectionService=Mock(return_value=mock_dependencies['event_selection_service']),
             AsyncOpenAI=Mock(return_value=mock_dependencies['openai_client'])
@@ -253,12 +251,7 @@ class TestEnhancedConversationServicePerformance:
         conversation_service._gather_simulation_context_with_monitoring = AsyncMock(side_effect=Exception("Context failed"))
 
         # Mock fallback response
-        fallback_response = Mock()
-        fallback_response.ai_response = "Fallback response"
-        fallback_response.corrected_transcript = "test"
-        fallback_response.word_usage_status = "NOT_USED"
-        fallback_response.usage_correctness_feedback = None
-        mock_dependencies['simple_openai_service'].generate_coaching_response = AsyncMock(return_value=fallback_response)
+        conversation_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         # Test fallback flow
         result = await conversation_service.generate_enhanced_response(
@@ -273,8 +266,8 @@ class TestEnhancedConversationServicePerformance:
         assert result["fallback_mode"] is True
         assert result["enhanced_mode"] is False
 
-        # Verify fallback service was called
-        mock_dependencies['simple_openai_service'].generate_coaching_response.assert_called_once()
+        # Verify fallback path was used
+        conversation_service._fallback_response.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_context_gathering_performance_breakdown(self, conversation_service, mock_dependencies):

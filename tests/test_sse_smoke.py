@@ -62,7 +62,6 @@ def hermetic_service():
                 "energy": {"numeric_value": 60},
             })
         ),
-        'simple_openai_service': Mock(generate_coaching_response=AsyncMock()),
         'session_state_service': Mock(
             add_conversation_message=AsyncMock(),
             get_conversation_history=AsyncMock(return_value=[]),
@@ -90,7 +89,6 @@ def hermetic_service():
         ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
         StateInfluenceService=Mock(return_value=deps['state_influence_service']),
         StateManagerService=Mock(return_value=deps['state_manager_service']),
-        SimpleOpenAIService=Mock(return_value=deps['simple_openai_service']),
         SessionStateService=Mock(return_value=deps['session_state_service']),
         EventSelectionService=Mock(return_value=deps['event_selection_service']),
         AsyncOpenAI=Mock(return_value=openai_client),
@@ -145,3 +143,39 @@ async def test_stream_yields_sse_sequence_and_persists(hermetic_service):
 
     openai_client.chat.completions.create.assert_awaited_once()
     assert openai_client.chat.completions.create.await_args.kwargs["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_fallback_stream_yields_sse_events_not_a_dict(hermetic_service):
+    """No simulation context + stream=True must still be an SSE generator.
+
+    Returning the fallback dict here made StreamingResponse iterate its key
+    names out to the client as the response body.
+    """
+    service, deps, openai_client = hermetic_service
+    service._gather_simulation_context_with_monitoring = AsyncMock(return_value={})
+
+    fallback_text = "Rough day over here, honestly. What have you been up to?"
+    completion = Mock()
+    completion.choices = [Mock()]
+    completion.choices[0].message.content = fallback_text
+    openai_client.chat.completions.create = AsyncMock(return_value=completion)
+
+    result = await service.generate_enhanced_response(
+        user_message="How was your day?",
+        user_id="user123",
+        conversation_id="conv789",
+        stream=True,
+    )
+
+    assert hasattr(result, "__aiter__"), "fallback + stream=True must return an async generator"
+
+    events = [_parse_sse(raw) async for raw in result]
+    names = [name for name, _ in events]
+    assert names == ["processing_start", "consciousness_chunk", "processing_complete"], names
+
+    assert events[1][1]["chunk"] == fallback_text
+    complete = events[2][1]
+    assert complete["response"] == fallback_text
+    assert complete["fallback_mode"] is True
+    assert complete["success"] is True

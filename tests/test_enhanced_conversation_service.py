@@ -17,7 +17,6 @@ class TestEnhancedConversationService:
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
-            'simple_openai_service': Mock(),
             'openai_client': Mock()
         }
 
@@ -26,7 +25,6 @@ class TestEnhancedConversationService:
         mocks['state_influence_service'].build_conversation_context = AsyncMock()
         mocks['state_manager_service'].get_current_global_state = AsyncMock()
         mocks['state_manager_service'].get_recent_events = AsyncMock()
-        mocks['simple_openai_service'].generate_coaching_response = AsyncMock()
 
         return mocks
 
@@ -37,14 +35,12 @@ class TestEnhancedConversationService:
              patch('app.services.enhanced_conversation_service.ConversationPromptService') as mock_prompt, \
              patch('app.services.enhanced_conversation_service.StateInfluenceService') as mock_influence, \
              patch('app.services.enhanced_conversation_service.StateManagerService') as mock_state, \
-             patch('app.services.enhanced_conversation_service.SimpleOpenAIService') as mock_simple, \
              patch('app.services.enhanced_conversation_service.AsyncOpenAI') as mock_openai:
 
             mock_backstory.return_value = mock_services['character_content_service']
             mock_prompt.return_value = mock_services['conversation_prompt_service']
             mock_influence.return_value = mock_services['state_influence_service']
             mock_state.return_value = mock_services['state_manager_service']
-            mock_simple.return_value = mock_services['simple_openai_service']
             mock_openai.return_value = mock_services['openai_client']
 
             service = EnhancedConversationService()
@@ -102,20 +98,15 @@ class TestEnhancedConversationService:
         assert "simulation_context" in result
 
     @pytest.mark.asyncio
-    async def test_fallback_to_simple_service(self, service):
-        """Test fallback to SimpleOpenAIService when enhanced context fails."""
+    async def test_fallback_to_inline_response(self, service):
+        """Test fallback to the inline _fallback_response when enhanced context fails."""
         enhanced_service, mocks = service
 
         # Make context gathering fail
         mocks['state_manager_service'].get_current_global_state.side_effect = Exception("Database error")
 
         # Setup fallback response
-        fallback_response = Mock()
-        fallback_response.ai_response = "Fallback response"
-        fallback_response.corrected_transcript = "How are you feeling today?"
-        fallback_response.word_usage_status = "NOT_USED"
-        fallback_response.usage_correctness_feedback = None
-        mocks['simple_openai_service'].generate_coaching_response.return_value = fallback_response
+        enhanced_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="How are you feeling today?",
@@ -293,12 +284,7 @@ class TestEnhancedConversationService:
         mocks['state_influence_service'].build_conversation_context.side_effect = Exception("Context error")
 
         # Setup working fallback
-        fallback_response = Mock()
-        fallback_response.ai_response = "Fallback response"
-        fallback_response.corrected_transcript = "Test message"
-        fallback_response.word_usage_status = "NOT_USED"
-        fallback_response.usage_correctness_feedback = None
-        mocks['simple_openai_service'].generate_coaching_response.return_value = fallback_response
+        enhanced_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="Test message",
@@ -389,7 +375,6 @@ class TestAwaitRegression:
                     "energy": {"numeric_value": 60},
                 })
             ),
-            'simple_openai_service': Mock(generate_coaching_response=AsyncMock()),
             'session_state_service': Mock(
                 add_conversation_message=AsyncMock(),
                 get_conversation_history=AsyncMock(return_value=[]),
@@ -420,12 +405,13 @@ class TestAwaitRegression:
             ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
             StateInfluenceService=Mock(return_value=deps['state_influence_service']),
             StateManagerService=Mock(return_value=deps['state_manager_service']),
-            SimpleOpenAIService=Mock(return_value=deps['simple_openai_service']),
             SessionStateService=Mock(return_value=deps['session_state_service']),
             EventSelectionService=Mock(return_value=deps['event_selection_service']),
             AsyncOpenAI=Mock(return_value=openai_client),
         ):
             service = EnhancedConversationService()
+        # Fallback must stay untouched on the enhanced path
+        service._fallback_response = AsyncMock(return_value="FALLBACK")
         return service, deps, openai_client
 
     @pytest.mark.asyncio
@@ -442,4 +428,4 @@ class TestAwaitRegression:
         assert result["fallback_mode"] is False
         assert result["ai_response"] == "hi"
         openai_client.chat.completions.create.assert_awaited_once()
-        deps['simple_openai_service'].generate_coaching_response.assert_not_called()
+        service._fallback_response.assert_not_called()
