@@ -1,6 +1,6 @@
 """
 State management integration for the simulation engine.
-Handles Ava's global state updates based on generated events.
+Handles Clara's global state updates based on generated events.
 """
 
 import logging
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class StateManagerService:
-    """Service for managing Ava's global state based on simulation events."""
+    """Service for managing Clara's global state based on simulation events."""
 
     def __init__(self):
         # Core traits that are tracked by the simulation engine
@@ -52,7 +52,7 @@ class StateManagerService:
 
     async def process_event_impact(self, event: GlobalEvents) -> Dict[str, Any]:
         """
-        Process an event and update Ava's global state accordingly.
+        Process an event and update Clara's global state accordingly.
         Returns a summary of state changes made.
         """
         try:
@@ -348,7 +348,7 @@ class StateManagerService:
             return []
 
     def _calculate_state_changes(self, event: GlobalEvents) -> Dict[str, Dict[str, Any]]:
-        """Calculate how an event should affect Ava's state traits."""
+        """Calculate how an event should affect Clara's state traits."""
         changes = {}
 
         # Base change amounts based on event intensity
@@ -491,7 +491,7 @@ class StateManagerService:
             raise
 
     async def get_current_global_state(self) -> Dict[str, Any]:
-        """Get Ava's current global state summary with caching optimization."""
+        """Get Clara's current global state summary with caching optimization."""
         try:
             # Check cache first
             current_time = time.time()
@@ -765,7 +765,7 @@ class StateManagerService:
 @shared_task(bind=True, name="app.services.simulation.state_manager.process_event_impacts")
 def process_event_impacts(self):
     """
-    Celery task to process event impacts on Ava's global state.
+    Celery task to process event impacts on Clara's global state.
     This task is called by the event processing workflow.
     """
     try:

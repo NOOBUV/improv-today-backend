@@ -108,16 +108,16 @@ class SimulationRepository:
             logger.error(f"Error updating global event {event_id}: {e}")
             raise
 
-    # Ava Global State operations
+    # Clara Global State operations
     async def get_clara_global_state(self, trait_name: str) -> Optional[ClaraGlobalState]:
-        """Get Ava's global state for a specific trait."""
+        """Get Clara's global state for a specific trait."""
         try:
             result = await self.db.execute(
                 select(ClaraGlobalState).where(ClaraGlobalState.trait_name == trait_name)
             )
             return result.scalar_one_or_none()
         except Exception as e:
-            logger.error(f"Error getting Ava global state for {trait_name}: {e}")
+            logger.error(f"Error getting Clara global state for {trait_name}: {e}")
             raise
 
     async def get_all_clara_global_states(self) -> List[ClaraGlobalState]:
@@ -136,7 +136,7 @@ class SimulationRepository:
         trait_name: str,
         state_data: ClaraGlobalStateCreate | ClaraGlobalStateUpdate
     ) -> ClaraGlobalState:
-        """Create or update Ava's global state for a trait."""
+        """Create or update Clara's global state for a trait."""
         try:
             existing_state = await self.get_clara_global_state(trait_name)
 
@@ -170,7 +170,7 @@ class SimulationRepository:
 
         except Exception as e:
             await self.db.rollback()
-            logger.error(f"Error creating/updating Ava state for {trait_name}: {e}")
+            logger.error(f"Error creating/updating Clara state for {trait_name}: {e}")
             raise
 
     # Simulation Config operations

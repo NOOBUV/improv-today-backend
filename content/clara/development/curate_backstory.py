@@ -57,7 +57,7 @@ def parse_memories(content: str) -> List[Dict]:
         age_match = re.search(r'\*\*Age/Time Period:\*\* (.+)', memory_text)
         context_match = re.search(r'\*\*Context:\*\* (.+)', memory_text)
         event_match = re.search(r'\*\*Event:\*\* (.+)', memory_text)
-        response_match = re.search(r'\*\*Ava\'s Response:\*\* (.+)', memory_text)
+        response_match = re.search(r'\*\*Clara\'s Response:\*\* (.+)', memory_text)
         insight_match = re.search(r'\*\*Character Insight:\*\* (.+)', memory_text)
         
         memory = {
@@ -85,7 +85,7 @@ def evaluate_memory_psychologically(client: OpenAI, memory: Dict, framework: str
 **Age:** {memory['age']}
 **Context:** {memory['context']}
 **Event:** {memory['event']}
-**Ava's Response:** {memory['response']}
+**Clara's Response:** {memory['response']}
 **Character Insight:** {memory['insight']}
 
 ## PILLAR MEMORIES CONTEXT (for reference):
@@ -206,11 +206,11 @@ def regenerate_weak_memory(client: OpenAI, memory: Dict, evaluation: Dict, pilla
         if dim['dimension_num'] == 1:
             improvements.append("ADD STRONG EMOTIONAL INTENSITY: Include vivid emotional reactions, physical sensations, strong feelings")
         elif dim['dimension_num'] == 2:
-            improvements.append("CONNECT TO SURVIVAL/THREAT: Show how this relates to Ava's fears of abandonment or loss of control")
+            improvements.append("CONNECT TO SURVIVAL/THREAT: Show how this relates to Clara's fears of abandonment or loss of control")
         elif dim['dimension_num'] == 3:
-            improvements.append("MAKE IT IDENTITY-DEFINING: Show how this moment shaped Ava's core personality traits")
+            improvements.append("MAKE IT IDENTITY-DEFINING: Show how this moment shaped Clara's core personality traits")
         elif dim['dimension_num'] == 4:
-            improvements.append("INCREASE REASONING VALUE: Make this explain WHY Ava behaves certain ways in her adult life")
+            improvements.append("INCREASE REASONING VALUE: Make this explain WHY Clara behaves certain ways in her adult life")
         elif dim['dimension_num'] == 5:
             improvements.append("ADD SPECIFIC SENSORY DETAILS: Include sounds, smells, textures, visual details")
         elif dim['dimension_num'] == 6:
@@ -220,7 +220,7 @@ def regenerate_weak_memory(client: OpenAI, memory: Dict, evaluation: Dict, pilla
         elif dim['dimension_num'] == 8:
             improvements.append("STRENGTHEN NARRATIVE LINKS: Connect clearly to Pillar Memories and character progression")
         elif dim['dimension_num'] == 9:
-            improvements.append("MAKE IT PSYCHOLOGICALLY STICKY: Create a memory Ava would mentally revisit often")
+            improvements.append("MAKE IT PSYCHOLOGICALLY STICKY: Create a memory Clara would mentally revisit often")
         elif dim['dimension_num'] == 10:
             improvements.append("CONNECT TO DEFENSE MECHANISMS: Show relationship to humor, self-reliance, or guardedness")
     
@@ -245,7 +245,7 @@ Regenerate this memory keeping the same age/time period but making it psychologi
 **Age/Time Period:** [Age]
 **Context:** [Detailed setting]
 **Event:** [Specific psychologically significant event]
-**Ava's Response:** [Her reaction showing psychological processing]
+**Clara's Response:** [Her reaction showing psychological processing]
 **Character Insight:** [What this reveals about her development]
 """
     
@@ -267,7 +267,7 @@ Regenerate this memory keeping the same age/time period but making it psychologi
         age_match = re.search(r'\*\*Age/Time Period:\*\* (.+)', regenerated_text)
         context_match = re.search(r'\*\*Context:\*\* (.+)', regenerated_text)
         event_match = re.search(r'\*\*Event:\*\* (.+)', regenerated_text)
-        response_match = re.search(r'\*\*Ava\'s Response:\*\* (.+)', regenerated_text)
+        response_match = re.search(r'\*\*Clara\'s Response:\*\* (.+)', regenerated_text)
         insight_match = re.search(r'\*\*Character Insight:\*\* (.+)', regenerated_text)
         
         return {
@@ -378,7 +378,7 @@ def create_final_corpus(evaluated_memories: List[Dict], pillar_memories: str, fr
     high_quality = [m for m in evaluated_memories if m['evaluation']['quality_tier'] == 'High-Quality']
     moderate = [m for m in evaluated_memories if m['evaluation']['quality_tier'] == 'Moderate']
     
-    corpus_content = f"""# Ava's Backstory Corpus
+    corpus_content = f"""# Clara's Backstory Corpus
 ## Psychologically Curated Character Foundation
 
 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -395,7 +395,7 @@ def create_final_corpus(evaluated_memories: List[Dict], pillar_memories: str, fr
 ---
 
 ## Premium Connecting Memories
-*Core memories essential for understanding Ava's psychology (40-50/50 score)*
+*Core memories essential for understanding Clara's psychology (40-50/50 score)*
 
 """
     
@@ -448,7 +448,7 @@ def create_final_corpus(evaluated_memories: List[Dict], pillar_memories: str, fr
 - **Low-Quality (10-19/50):** {len([m for m in evaluated_memories if m['evaluation']['quality_tier'] == 'Low-Quality'])} memories
 
 ### Recommended Usage:
-This curated corpus provides a psychologically grounded foundation for Ava's character. The memories are organized by psychological significance and can be used to inform:
+This curated corpus provides a psychologically grounded foundation for Clara's character. The memories are organized by psychological significance and can be used to inform:
 - Dialogue patterns and word choice
 - Emotional responses to situations
 - Decision-making processes

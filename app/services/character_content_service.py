@@ -235,7 +235,7 @@ class CharacterContentService:
         try:
             gist_content = self.load("character_gist")
             if not gist_content:
-                gist_content = "Ava is a 22-year-old creative strategist with a dry wit and observant nature."
+                gist_content = "Clara is a 22-year-old creative strategist with a dry wit and observant nature."
 
             char_limit = max_chars or self.config.MAX_BACKSTORY_CHARS
             limited_content = self._combine_and_limit_content([gist_content], char_limit)
@@ -256,7 +256,7 @@ class CharacterContentService:
             logger.error(f"Error getting fallback content: {str(e)}")
             # Return minimal fallback
             return {
-                "content": "Ava is a 22-year-old creative strategist.",
+                "content": "Clara is a 22-year-old creative strategist.",
                 "content_types": ["minimal_fallback"],
                 "char_count": 43,
                 "estimated_tokens": 11,

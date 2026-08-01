@@ -1,6 +1,6 @@
 """
 Consciousness Generator Service for handling LLM-powered simulation event responses.
-Generates authentic emotional responses and actions for Ava's simulation events.
+Generates authentic emotional responses and actions for Clara's simulation events.
 """
 import json
 import logging

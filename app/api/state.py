@@ -65,7 +65,7 @@ async def get_current_global_state(
     token: str = Depends(security)
 ) -> StateResponse:
     """
-    Get Ava's current global state summary.
+    Get Clara's current global state summary.
 
     Returns current values for all core traits with trends and last update info.
     """

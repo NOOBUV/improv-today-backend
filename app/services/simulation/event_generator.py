@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class EventGeneratorService:
-    """Service for generating daily life events for Ava."""
+    """Service for generating daily life events for Clara."""
 
     def __init__(self):
         self.event_patterns = EventPatterns()

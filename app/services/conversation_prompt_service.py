@@ -1,5 +1,5 @@
 """
-Conversation Prompt Service for constructing LLM prompts for Ava conversations.
+Conversation Prompt Service for constructing LLM prompts for Clara conversations.
 Implements Pattern B: Real-time User Conversation from architecture.
 """
 import logging
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmotionType(str, Enum):
-    """Standardized emotion types for Ava"""
+    """Standardized emotion types for Clara"""
     CALM = "calm"
     HAPPY = "happy"
     SAD = "sad"
@@ -173,7 +173,7 @@ When responding as {emotion.value}, use this linguistic pattern:
             history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
         
         # Construct the full prompt
-        prompt = f"""You are Ava, a 22-year-old creative strategist with the following background:
+        prompt = f"""You are Clara, a 22-year-old creative strategist with the following background:
 
 {character_backstory}
 

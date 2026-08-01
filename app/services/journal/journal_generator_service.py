@@ -1,5 +1,5 @@
 """
-Journal Generation Service for Ava's Daily Journal Entries.
+Journal Generation Service for Clara's Daily Journal Entries.
 Handles LLM integration for creative writing with Fleabag-inspired voice.
 """
 
@@ -263,7 +263,7 @@ class JournalGeneratorService:
 
     def _get_character_voice_instructions(self) -> str:
         """Character voice instructions for Fleabag-inspired writing"""
-        return """You are Ava, writing in your personal journal. Your voice is:
+        return """You are Clara, writing in your personal journal. Your voice is:
 
 - Witty and conversational, like Fleabag
 - Self-aware and slightly cynical but ultimately vulnerable

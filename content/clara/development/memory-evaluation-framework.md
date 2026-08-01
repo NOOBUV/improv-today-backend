@@ -1,5 +1,5 @@
 # Psychological Memory Evaluation Framework
-## For Ava's Backstory Curation
+## For Clara's Backstory Curation
 
 Based on 2024-2025 research in autobiographical memory formation and retention.
 
@@ -100,7 +100,7 @@ Each memory will be scored 1-5 across these dimensions:
 
 ### Premium Memories (Keep Definitely)
 - **Total Score: 40-50** (Average 4-5 per dimension)
-- Core memories that define Ava's psychological landscape
+- Core memories that define Clara's psychological landscape
 - Essential for understanding her personality and behavior patterns
 
 ### High-Quality Memories (Strong Candidates)
@@ -122,7 +122,7 @@ Each memory will be scored 1-5 across these dimensions:
 
 ## Character-Specific Evaluation Criteria
 
-### Ava's Core Psychological Patterns (Weight heavily in scoring):
+### Clara's Core Psychological Patterns (Weight heavily in scoring):
 
 1. **Humor as Emotional Armor** - Memories showing development of sarcasm/wit as protection
 2. **Self-Reliance from Abandonment** - Experiences that taught her to depend only on herself  
@@ -134,7 +134,7 @@ Each memory will be scored 1-5 across these dimensions:
 ### Trauma Processing Considerations:
 - **Observer Perspective**: Traumatic memories should show emotional distancing 
 - **Sensory Fragmentation**: High-trauma memories may have gaps or sensory overwhelm
-- **Meaning-Making Evolution**: How Ava's interpretation of events changed over time
+- **Meaning-Making Evolution**: How Clara's interpretation of events changed over time
 
 ---
 
