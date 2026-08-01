@@ -210,7 +210,7 @@ class TestEnhancedConversationServicePerformance:
         })
 
         # Mock response generation
-        conversation_service._generate_context_aware_response_with_monitoring = AsyncMock(return_value={
+        conversation_service._respond = AsyncMock(return_value={
             "ai_response": "Test response",
             "corrected_transcript": "test message",
             "simulation_context": {"conversation_emotion": "happy"},
@@ -239,7 +239,7 @@ class TestEnhancedConversationServicePerformance:
         # Verify mocked services were called
         mock_dependencies['session_state_service'].add_conversation_message.assert_called()
         conversation_service._gather_simulation_context_with_monitoring.assert_called_once()
-        conversation_service._generate_context_aware_response_with_monitoring.assert_called_once()
+        conversation_service._respond.assert_called_once()
         conversation_service._track_events_mentioned.assert_called_once()
 
     @pytest.mark.asyncio
@@ -346,7 +346,7 @@ class TestEnhancedConversationServicePerformance:
         conversation_service.performance_monitor = MagicMock()
 
         # Test response generation
-        result = await conversation_service._generate_context_aware_response_with_monitoring(
+        result = await conversation_service._respond(
             user_message="test",
             simulation_context=simulation_context,
             timing_context={"correlation_id": "test_corr"}
