@@ -247,7 +247,7 @@ class SubscriptionManagementService:
                 status="error"
             )
 
-    def cancel_user_subscription(
+    async def cancel_user_subscription(
         self,
         db: Session,
         user_id: int,
@@ -257,16 +257,17 @@ class SubscriptionManagementService:
         Cancel user's subscription.
         """
         subscription = self.get_user_active_subscription(db, user_id)
-        
+
         if not subscription or not subscription.stripe_subscription_id:
             return None
-        
+
         try:
-            # Cancel in Stripe
-            self.stripe_service.cancel_subscription(
+            # Cancel in Stripe FIRST: a raise here must leave the local row untouched,
+            # otherwise we mark a subscription canceled that Stripe keeps billing.
+            await self.stripe_service.cancel_subscription(
                 subscription.stripe_subscription_id, at_period_end
             )
-            
+
             # Update local database
             if at_period_end:
                 subscription.cancel_at_period_end = True
@@ -326,7 +327,7 @@ class SubscriptionManagementService:
         logger.info(f"Recorded payment: {payment.id} for user {user_id}")
         return payment
 
-    def sync_subscription_from_stripe(
+    async def sync_subscription_from_stripe(
         self,
         db: Session,
         stripe_subscription_id: str
@@ -336,7 +337,7 @@ class SubscriptionManagementService:
         """
         try:
             # Get subscription from Stripe
-            stripe_sub = self.stripe_service.get_subscription(stripe_subscription_id)
+            stripe_sub = await self.stripe_service.get_subscription(stripe_subscription_id)
             
             # Find local subscription
             result = db.execute(
@@ -362,7 +363,8 @@ class SubscriptionManagementService:
             logger.info(f"Synced subscription {local_sub.id} from Stripe")
             return local_sub
             
-        except (SQLAlchemyError, StripeError, HTTPException, ValueError, AttributeError) as e:
+        except (SQLAlchemyError, StripeError, HTTPException, ValueError) as e:
+            # ValueError: StripeService() refuses to build without STRIPE_SECRET_KEY
             logger.error(f"Failed to sync subscription from Stripe: {str(e)}")
             return None
 
