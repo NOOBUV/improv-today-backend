@@ -5,6 +5,7 @@ Manages session state storage with Redis and provides session lifecycle manageme
 
 import logging
 import json
+import os
 import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
@@ -36,6 +37,21 @@ _STOPWORDS = {
 }
 
 _SNIPPET_CHARS = 200
+
+# Retrieval backend for get_related_past_snippets: "local" (keyword ILIKE over
+# conversation_log) or "platform" (TencentDB-Agent-Memory L0 hybrid search).
+# Platform errors/timeouts always fall back to local — conversation_log stays
+# the source of truth either way.
+CLARA_MEMORY_BACKEND = os.getenv("CLARA_MEMORY_BACKEND", "local")
+CLARA_MEMORY_URL = os.getenv("CLARA_MEMORY_URL", "http://host.docker.internal:8420")
+# Hot conversation path: budget is tight on purpose, fallback is cheap.
+_PLATFORM_TIMEOUT_S = float(os.getenv("CLARA_MEMORY_TIMEOUT_S", "1.5"))
+
+# "**[user]** Session: k [2026-08-02T15:53:26.913Z] (score: 0.033)\n\n<content>"
+_PLATFORM_HIT = re.compile(
+    r"\*\*\[(?P<role>\w+)\]\*\*[^\[]*\[(?P<ts>[^\]]+)\][^\n]*\n+(?P<content>.+?)(?=\n---|\Z)",
+    re.DOTALL,
+)
 
 
 class PastSnippet(BaseModel):
@@ -392,8 +408,77 @@ class SessionStateService:
         limit: int = 3
     ) -> List[PastSnippet]:
         """
-        Associative recall: lines from OTHER conversations that share keywords with
-        the incoming message, most-matching first, then most recent.
+        Associative recall, dispatched on CLARA_MEMORY_BACKEND.
+
+        Default "local" is the keyword query below. "platform" asks
+        TencentDB-Agent-Memory for hybrid (vector + FTS) hits and falls back to
+        local on any error or timeout.
+        """
+        if CLARA_MEMORY_BACKEND == "platform":
+            snippets = await self._platform_past_snippets(user_message, limit)
+            if snippets is not None:
+                return snippets
+        return await self._local_past_snippets(
+            user_id, user_message, exclude_conversation_id, limit
+        )
+
+    async def _platform_past_snippets(
+        self, user_message: str, limit: int
+    ) -> Optional[List[PastSnippet]]:
+        """
+        L0 hybrid search against the memory platform.
+
+        Returns None (not []) on failure so the caller can tell "platform is
+        down, use local" apart from "platform ran and found nothing".
+        """
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=_PLATFORM_TIMEOUT_S) as client:
+                resp = await client.post(
+                    f"{CLARA_MEMORY_URL}/search/conversations",
+                    json={"query": user_message, "limit": limit},
+                    headers={"x-tdai-service-id": "default"},
+                )
+                resp.raise_for_status()
+                results = resp.json().get("results", "")
+
+            snippets: List[PastSnippet] = []
+            for m in _PLATFORM_HIT.finditer(results):
+                content = m.group("content").strip()
+                if not content:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(m.group("ts").replace("Z", "+00:00"))
+                    age = _humanize_age(ts)
+                except ValueError:
+                    age = "earlier"
+                snippets.append(PastSnippet(
+                    role=m.group("role"),
+                    content=(
+                        content[:_SNIPPET_CHARS].rstrip() + "..."
+                        if len(content) > _SNIPPET_CHARS else content
+                    ),
+                    age=age,
+                ))
+                if len(snippets) >= limit:
+                    break
+            return snippets
+
+        except Exception as e:
+            logger.warning(f"Platform recall failed, falling back to local: {e}")
+            return None
+
+    async def _local_past_snippets(
+        self,
+        user_id: str,
+        user_message: str,
+        exclude_conversation_id: str,
+        limit: int = 3
+    ) -> List[PastSnippet]:
+        """
+        Lines from OTHER conversations that share keywords with the incoming
+        message, most-matching first, then most recent.
 
         ponytail: ILIKE keyword overlap, no embeddings. Swap in pg_trgm/tsvector or
         a vector index if recall quality becomes the bottleneck.

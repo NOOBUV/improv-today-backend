@@ -90,6 +90,42 @@ async def test_recall_is_best_effort(monkeypatch):
     ) == []
 
 
+@pytest.mark.asyncio
+async def test_platform_backend_falls_back_to_local_on_error(monkeypatch):
+    """Flag flipped to "platform", platform HTTP blows up → local keyword hit."""
+    now = datetime.now(timezone.utc)
+    engine = await _seeded_maker(monkeypatch, [
+        ConversationLog(
+            user_id="42", conversation_id="old-1", role="user",
+            content="that networking event was a disaster, I knew nobody there",
+            created_at=now - timedelta(days=2),
+        ),
+    ])
+    monkeypatch.setattr(
+        "app.services.session_state_service.CLARA_MEMORY_BACKEND", "platform"
+    )
+
+    class BoomClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **kw):
+            raise RuntimeError("platform unreachable")
+
+    monkeypatch.setattr("httpx.AsyncClient", BoomClient)
+
+    snippets = await SessionStateService().get_related_past_snippets(
+        user_id="42",
+        user_message="remember that networking event?",
+        exclude_conversation_id="current",
+    )
+
+    assert [s.content for s in snippets] == [
+        "that networking event was a disaster, I knew nobody there"
+    ]
+    await engine.dispose()
+
+
 def _prompt(**kwargs):
     return ConversationPromptService().construct_conversation_prompt_with_mood(
         character_backstory="Clara, 22.",
