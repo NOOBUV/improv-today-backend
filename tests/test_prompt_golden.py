@@ -9,6 +9,9 @@ is BYTE-IDENTICAL to the old two-step
 GOLDEN_SHA256 pins the exact bytes of the live prompt for fixed fixtures
 (equivalence to the pre-refactor two-step concatenation was proven at capture time,
 commit 0b50e84).
+
+Re-captured 2026-08-02: voice-pipeline prompt guidance added (STT-transcript
+tolerance, speakable TTS-safe "message" output, short lead sentence).
 """
 import hashlib
 
@@ -50,7 +53,7 @@ USER_MESSAGE = "How did the pitch go?"
 
 STRATEGIES = ["fresh_events_rotation", "specific_person_focus", "current_day_events"]
 
-GOLDEN_SHA256 = "f34c3aa1907d203ca318eb5c8030c80be67cac6f34a985e3945eea30c4b2418b"
+GOLDEN_SHA256 = "0ff181863daf7c8fd1f49e050f1950cf2200753f9e09a939d275e8f41e96cadc"
 
 
 @pytest.fixture

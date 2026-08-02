@@ -674,7 +674,10 @@ class ClaraConversationService:
                 {"role": "system", "content": (
                     f"{base_prompt}\n\n"
                     "You are Clara. Reply in character as plain text (no JSON), "
-                    "1-2 conversational sentences, and ask a follow-up question."
+                    "1-2 conversational sentences, and ask a follow-up question.\n"
+                    "The user's message is a speech-to-text transcript that may contain errors - infer what they meant "
+                    "and never comment on or correct the wording. Your reply is spoken aloud, so use plain speakable "
+                    "prose (no markdown, asterisks, emoji, or stage directions) and start with a short sentence."
                     f"{history_context}"
                 )},
                 {"role": "user", "content": user_message}
