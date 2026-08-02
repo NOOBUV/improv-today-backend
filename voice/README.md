@@ -34,32 +34,54 @@ paying warm-up cost: ~10s once the weights are on disk, minutes on the first-eve
 
 ## API
 
-- `GET /health` → `{"status":"ok","engine":"qwen3","qwen3":"ready","qwen3_speaker":"vivian","kokoro":"ready","voice":"af_heart"}`
+- `GET /health` → adds `streaming` and `streaming_endpoint` to the engine readiness above
   (`engine` is whichever is tried first; `qwen3` reads `unavailable (...)` if it failed to load)
-- `POST /v1/audio/speech` → WAV bytes. OpenAI-shaped body plus an emotion:
-  `{"input": "...", "emotion": "calm", "voice": "af_heart", "speed": 1.0}`
+- `POST /v1/audio/speech/stream` → **the fast path.** Raw PCM `s16le` mono, one chunk per
+  ~`STREAM_INTERVAL_S` of audio, sample rate in the `X-Sample-Rate` header,
+  `Content-Type: application/octet-stream`. Not WAV: a header written before the length is
+  known is a lie the client then has to un-believe.
+- `POST /v1/audio/speech` → the whole WAV in one response. Kept for callers that can't stream.
+
+Both take the same OpenAI-shaped body plus an emotion:
+`{"input": "...", "emotion": "calm", "voice": "af_heart", "speed": 1.0}`
 
 `emotion` is one of Clara's `EmotionType` values — `calm` (default), `happy`, `sad`,
 `stressed`, `sassy` — mapped to a Qwen3 `instruct` string by `INSTRUCT` in `app.py`.
 Anything unrecognised falls back to `calm` rather than erroring. `voice` and `speed`
 apply to the Kokoro path only; Qwen3 is pinned to `vivian`.
 
-Warm, on an M2: ~1.8s to first audio, roughly realtime overall.
+Warm, on an M2: first chunk in ~0.9-1.1s whatever the sentence length, then generation runs
+a little faster than playback. The whole-WAV endpoint instead costs the full synthesis before
+a single byte — 3.5s for a short line, 8.8s for a long one.
+
+### Fallback on the streaming path
+
+If Qwen3 hasn't produced its **first** chunk within `FIRST_CHUNK_TIMEOUT_S`, or dies before it,
+the response is a complete Kokoro WAV instead — so callers must branch on `Content-Type`.
+Nothing audible has been committed at that point, so the swap is invisible. Once chunks are
+flowing the stream is allowed to run to `MAX_TOKENS`; `SYNTH_TIMEOUT_S` applies to the
+whole-WAV endpoint only. The deadline starts when the generation actually owns the model, not
+when the request arrived — otherwise a prefetched sentence queued behind its predecessor would
+fail it every time.
 
 ## How the frontend uses it
 
-`BrowserSpeechService.speakChunk()` (frontend `src/lib/speech.ts`) POSTs each sentence
-here and plays the WAV. The turn's emotion comes off the conversation stream's
-`context_ready` event — which lands before the first chunk, so even the opening sentence
-is in character. On any failure — server down, non-200, fetch error — it falls back to
-`window.speechSynthesis` silently. Nothing breaks if this server isn't running; Clara
-just sounds worse. CORS allows `http://localhost:3000` only.
+`BrowserSpeechService` (frontend `src/lib/speech.ts`) POSTs each sentence to the streaming
+endpoint and schedules the PCM chunks back-to-back through Web Audio, so Clara starts talking
+while the rest is still being generated. It reads one sentence ahead: when sentence N starts
+playing, N+1's request is already in flight and waiting on this server's lock. The turn's
+emotion comes off the conversation stream's `context_ready` event — which lands before the
+first chunk, so even the opening sentence is in character. On any failure — server down,
+non-200, fetch error — it falls back to `window.speechSynthesis` silently. Nothing breaks if
+this server isn't running; Clara just sounds worse. CORS allows `http://localhost:3000` only,
+and must expose `X-Sample-Rate` or the browser can't decode what it's given.
 
 ## Notes
 
-- ponytail: one process, synchronous inference, no queue, no cache, one lock around the
-  model. There is exactly one browser talking to it and it speaks a sentence at a time.
-  Add a thread pool / audio cache when that stops being true.
+- ponytail: one process, one lock around the model, no cache. The frontend's read-ahead means
+  a second request now genuinely waits at that lock — it starts the instant the current
+  sentence finishes generating, which is what you want from one GPU. Kokoro has its own lock so
+  it stays servable while an abandoned Qwen3 generation winds down.
 - Qwen3 occasionally rambles on low-energy lines, so generation is capped at `MAX_TOKENS`
   (~20s of audio at the 12Hz codec rate) and the whole call at `SYNTH_TIMEOUT_S`.
 - Parakeet STT can live in this same app later — same venv, add a `/v1/audio/transcriptions`
