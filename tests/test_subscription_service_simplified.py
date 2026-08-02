@@ -5,9 +5,10 @@ Tests focus on the actual methods that exist in the service to provide
 reliable validation for the QA gate requirements.
 """
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
+from stripe.error import StripeError
 
 from app.services.subscription_management_service import SubscriptionManagementService
 from app.models.subscription import UserSubscription, SubscriptionPlan, PaymentRecord
@@ -171,16 +172,20 @@ class TestSubscriptionManagementServiceCore:
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
 
-    def test_cancel_user_subscription(
+    @pytest.mark.asyncio
+    async def test_cancel_user_subscription(
         self, subscription_service, mock_db, active_subscription
     ):
         """Test canceling a user subscription."""
         # Mock database query
-        mock_db.query.return_value.filter.return_value.first.return_value = active_subscription
+        mock_result = Mock()
+        mock_result.scalars.return_value.first.return_value = active_subscription
+        mock_db.execute.return_value = mock_result
         mock_db.commit = Mock()
+        subscription_service._stripe_service.cancel_subscription = AsyncMock()
 
         # Test
-        result = subscription_service.cancel_user_subscription(
+        result = await subscription_service.cancel_user_subscription(
             mock_db, active_subscription.user_id
         )
 
@@ -188,6 +193,50 @@ class TestSubscriptionManagementServiceCore:
         assert result is not None
         assert result.cancel_at_period_end == True
         mock_db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_user_subscription_awaits_stripe(
+        self, subscription_service, mock_db, active_subscription
+    ):
+        """Stripe must actually be called - an un-awaited coroutine kept the billing alive."""
+        mock_result = Mock()
+        mock_result.scalars.return_value.first.return_value = active_subscription
+        mock_db.execute.return_value = mock_result
+        mock_db.commit = Mock()
+        stripe_cancel = AsyncMock()
+        subscription_service._stripe_service.cancel_subscription = stripe_cancel
+
+        result = await subscription_service.cancel_user_subscription(
+            mock_db, active_subscription.user_id, at_period_end=False
+        )
+
+        stripe_cancel.assert_awaited_once_with(
+            active_subscription.stripe_subscription_id, False
+        )
+        assert result.status == "canceled"
+        mock_db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_user_subscription_stripe_failure_leaves_row_active(
+        self, subscription_service, mock_db, active_subscription
+    ):
+        """Stripe refused the cancel: the local row must not claim it was canceled."""
+        mock_result = Mock()
+        mock_result.scalars.return_value.first.return_value = active_subscription
+        mock_db.execute.return_value = mock_result
+        mock_db.commit = Mock()
+        subscription_service._stripe_service.cancel_subscription = AsyncMock(
+            side_effect=StripeError("card declined")
+        )
+
+        result = await subscription_service.cancel_user_subscription(
+            mock_db, active_subscription.user_id
+        )
+
+        assert result is None
+        assert active_subscription.status == "active"
+        assert active_subscription.cancel_at_period_end is not True
+        mock_db.commit.assert_not_called()
 
     def test_get_active_plans(
         self, subscription_service, mock_db, sample_plan

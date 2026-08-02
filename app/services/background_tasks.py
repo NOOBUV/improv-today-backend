@@ -83,11 +83,6 @@ class BackgroundTaskManager:
         except Exception as e:
             logger.error(f"Error processing trial management: {str(e)}")
     
-    async def run_trial_management_once(self):
-        """Run trial management tasks once (useful for manual execution or testing)."""
-        logger.info("Running trial management tasks manually...")
-        await self._process_trial_management()
-
 
 # Global background task manager instance
 background_task_manager = BackgroundTaskManager()

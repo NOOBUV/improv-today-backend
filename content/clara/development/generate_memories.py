@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Memory Generation Script for Ava's Backstory
+Memory Generation Script for Clara's Backstory
 Generates connecting memories using OpenAI API based on Pillar Memories
 """
 
@@ -70,7 +70,7 @@ def generate_memories_for_period(client: OpenAI, period_prompt: str) -> str:
 
 def main():
     """Main generation workflow"""
-    print("🧠 Generating Ava's Connecting Memories...")
+    print("🧠 Generating Clara's Connecting Memories...")
     print("=" * 50)
     
     try:
@@ -150,7 +150,7 @@ Generate 4-5 connecting memories for this specific time period that bridge to th
         # Save all generated memories to file
         output_file = Path(__file__).parent / "generated-connecting-memories.md"
         
-        header = f"""# Generated Connecting Memories for Ava
+        header = f"""# Generated Connecting Memories for Clara
 
 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 **Model:** GPT-4 (Premium LLM)

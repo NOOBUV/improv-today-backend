@@ -78,15 +78,15 @@ def create_regeneration_prompt(memory: Dict, weak_analysis: Dict, pillar_context
             )
         elif dim_num == 2:  # Survival/Threat Significance
             improvement_instructions.append(
-                "- ADD SURVIVAL/THREAT ELEMENTS: Connect to Ava's core fears of abandonment, loss of control, or threats to her emotional/physical safety. Show how this memory relates to survival instincts"
+                "- ADD SURVIVAL/THREAT ELEMENTS: Connect to Clara's core fears of abandonment, loss of control, or threats to her emotional/physical safety. Show how this memory relates to survival instincts"
             )
         elif dim_num == 3:  # Identity Formation Impact
             improvement_instructions.append(
-                "- STRENGTHEN IDENTITY IMPACT: Show how this moment shaped Ava's personality - her humor, self-reliance, perfectionism, or guardedness. Make it a defining character moment"
+                "- STRENGTHEN IDENTITY IMPACT: Show how this moment shaped Clara's personality - her humor, self-reliance, perfectionism, or guardedness. Make it a defining character moment"
             )
         elif dim_num == 4:  # Autobiographical Reasoning Value
             improvement_instructions.append(
-                "- IMPROVE REASONING VALUE: Make this memory explain WHY Ava behaves certain ways. It should answer 'This is why I am the way I am' and connect to her major life patterns"
+                "- IMPROVE REASONING VALUE: Make this memory explain WHY Clara behaves certain ways. It should answer 'This is why I am the way I am' and connect to her major life patterns"
             )
         elif dim_num == 5:  # Memory Specificity & Vividness
             improvement_instructions.append(
@@ -94,7 +94,7 @@ def create_regeneration_prompt(memory: Dict, weak_analysis: Dict, pillar_context
             )
         elif dim_num == 6:  # Social/Relational Learning
             improvement_instructions.append(
-                "- ENHANCE SOCIAL LEARNING: Show Ava learning important lessons about trust, relationships, social dynamics, or how to interact with others. Include relationship insights"
+                "- ENHANCE SOCIAL LEARNING: Show Clara learning important lessons about trust, relationships, social dynamics, or how to interact with others. Include relationship insights"
             )
         elif dim_num == 7:  # Developmental Timing Significance
             improvement_instructions.append(
@@ -102,15 +102,15 @@ def create_regeneration_prompt(memory: Dict, weak_analysis: Dict, pillar_context
             )
         elif dim_num == 8:  # Narrative Coherence & Connection
             improvement_instructions.append(
-                "- STRENGTHEN NARRATIVE CONNECTION: Clearly link to the Pillar Memories and show progression in Ava's psychological development. Create bridges between major events"
+                "- STRENGTHEN NARRATIVE CONNECTION: Clearly link to the Pillar Memories and show progression in Clara's psychological development. Create bridges between major events"
             )
         elif dim_num == 9:  # Unconscious Processing Likelihood
             improvement_instructions.append(
-                "- INCREASE PSYCHOLOGICAL SIGNIFICANCE: Make this a memory Ava would mentally revisit often - either because it's painful, triumphant, or psychologically important"
+                "- INCREASE PSYCHOLOGICAL SIGNIFICANCE: Make this a memory Clara would mentally revisit often - either because it's painful, triumphant, or psychologically important"
             )
         elif dim_num == 10:  # Psychological Defense Relevance
             improvement_instructions.append(
-                "- CONNECT TO DEFENSE MECHANISMS: Show how this memory relates to Ava's coping strategies - humor as armor, self-reliance, perfectionism, or emotional guardedness"
+                "- CONNECT TO DEFENSE MECHANISMS: Show how this memory relates to Clara's coping strategies - humor as armor, self-reliance, perfectionism, or emotional guardedness"
             )
     
     regeneration_prompt = f"""
@@ -128,14 +128,14 @@ Completely rewrite this memory to be more psychologically authentic and impactfu
 
 {chr(10).join(improvement_instructions)}
 
-## PSYCHOLOGICAL CONTEXT (Ava's Character):
+## PSYCHOLOGICAL CONTEXT (Clara's Character):
 {pillar_context}
 
 ## REGENERATION REQUIREMENTS:
 1. Keep the same basic age/time period as the original
 2. Make it psychologically realistic - this is a memory that would actually persist in human autobiographical memory
-3. Use the same format: Age/Time Period, Context, Event, Ava's Response, Character Insight
-4. Ensure it connects to Ava's established psychological patterns (humor as defense, self-reliance, perfectionism, guarded intimacy)
+3. Use the same format: Age/Time Period, Context, Event, Clara's Response, Character Insight
+4. Ensure it connects to Clara's established psychological patterns (humor as defense, self-reliance, perfectionism, guarded intimacy)
 5. Make it specific and vivid - include sensory details, emotions, and concrete actions
 6. Show character growth or reinforcement of established traits
 
@@ -145,7 +145,7 @@ Completely rewrite this memory to be more psychologically authentic and impactfu
 **Age/Time Period:** [Age or timing]
 **Context:** [Setting and circumstances with more detail]
 **Event:** [What specifically happened - make it more psychologically significant]
-**Ava's Response:** [Her reaction, thoughts, feelings - show psychological processing]
+**Clara's Response:** [Her reaction, thoughts, feelings - show psychological processing]
 **Character Insight:** [What this reveals about her psychology and development]
 ```
 

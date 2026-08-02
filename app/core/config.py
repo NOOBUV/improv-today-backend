@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
+    # Gemini Configuration (Clara's conversation model, via OpenAI-compatible endpoint)
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     
     # Supabase Database Configuration
     database_url: str = os.getenv("DATABASE_URL", "")
@@ -63,3 +66,14 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 settings = Settings()
+
+# Fail fast at import: a production boot with either of these missing is a broken
+# deploy, not a degraded one (the default JWT secret forges tokens; Clara without
+# an API key answers with canned fallback lines).
+if settings.is_production:
+    if settings.jwt_secret == "your-secret-key-change-in-production":
+        raise RuntimeError("JWT_SECRET must be set in production")
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY must be set in production")
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY must be set in production")

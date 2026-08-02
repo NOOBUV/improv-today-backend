@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth.subscription_guard import require_active_subscription, SubscriptionGuard
 from app.auth.dependencies import get_current_user, get_current_user_optional
@@ -239,10 +240,10 @@ class TestSubscriptionSecurityGuards:
     ):
         """Test subscription guard handles database errors gracefully."""
         # Mock database error
-        mock_db.query.side_effect = Exception("Database connection failed")
+        mock_db.query.side_effect = SQLAlchemyError("Database connection failed")
 
         # Mock the subscription service to handle the error gracefully
-        subscription_guard._subscription_service.check_user_subscription_status.side_effect = Exception("Database connection failed")
+        subscription_guard._subscription_service.check_user_subscription_status.side_effect = SQLAlchemyError("Database connection failed")
 
         # Test
         result = subscription_guard.verify_conversation_access(sample_user, mock_db)
@@ -291,7 +292,7 @@ class TestSubscriptionSecurityGuards:
         with patch('app.auth.subscription_guard.subscription_guard.verify_conversation_access') as mock_verify:
             with patch('app.auth.subscription_guard.subscription_guard.subscription_service.check_user_subscription_status') as mock_status:
                 mock_verify.return_value = False
-                mock_status.side_effect = Exception("Service unavailable")
+                mock_status.side_effect = SQLAlchemyError("Service unavailable")
 
                 # Test that generic error message is used
                 with pytest.raises(HTTPException) as exc_info:
@@ -355,3 +356,22 @@ class TestSubscriptionSecurityGuards:
                 require_active_subscription(current_user=inactive_user, db=mock_db)
 
             assert exc_info.value.status_code == status.HTTP_402_PAYMENT_REQUIRED
+
+@pytest.mark.asyncio
+async def test_get_subscription_status_does_not_await_sync_service(mock_db, sample_user):
+    """GET /subscriptions/status must not await the sync service method.
+
+    A stray `await` broke this endpoint 100% of the time: the TypeError was
+    swallowed by the endpoint's `except Exception` and returned as a 500.
+    """
+    from app.api.subscriptions import get_subscription_status_current
+
+    expected = SubscriptionStatus(is_active=True, is_trial=False, status="active")
+
+    with patch('app.api.subscriptions.subscription_service') as mock_service:
+        mock_service.check_user_subscription_status = Mock(return_value=expected)
+
+        result = await get_subscription_status_current(current_user=sample_user, db=mock_db)
+
+    assert result is expected
+    mock_service.check_user_subscription_status.assert_called_once_with(mock_db, sample_user.id)

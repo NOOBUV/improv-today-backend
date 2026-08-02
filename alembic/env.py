@@ -20,8 +20,12 @@ import app.models
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL from our settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Set the database URL from our settings (normalized to the psycopg3 driver —
+# settings.database_url is raw and would make SQLAlchemy default to psycopg2)
+_url = settings.database_url
+if _url.startswith("postgresql://"):
+    _url = _url.replace("postgresql://", "postgresql+psycopg://", 1)
+config.set_main_option("sqlalchemy.url", _url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

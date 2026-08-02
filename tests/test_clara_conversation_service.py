@@ -1,53 +1,49 @@
 """
-Tests for EnhancedConversationService - Story 2.6 Enhanced Conversational Context Integration
+Tests for ClaraConversationService - Story 2.6 Enhanced Conversational Context Integration
 """
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 
 
-class TestEnhancedConversationService:
-    """Test suite for EnhancedConversationService functionality."""
+class TestClaraConversationService:
+    """Test suite for ClaraConversationService functionality."""
 
     @pytest.fixture
     def mock_services(self):
         """Mock all dependent services."""
         mocks = {
-            'contextual_backstory_service': Mock(),
+            'character_content_service': Mock(),
             'conversation_prompt_service': Mock(),
             'state_influence_service': Mock(),
             'state_manager_service': Mock(),
-            'simple_openai_service': Mock(),
             'openai_client': Mock()
         }
 
         # Setup async methods
-        mocks['contextual_backstory_service'].select_relevant_content = AsyncMock()
+        mocks['character_content_service'].select_relevant_content = AsyncMock()
         mocks['state_influence_service'].build_conversation_context = AsyncMock()
         mocks['state_manager_service'].get_current_global_state = AsyncMock()
         mocks['state_manager_service'].get_recent_events = AsyncMock()
-        mocks['simple_openai_service'].generate_coaching_response = AsyncMock()
 
         return mocks
 
     @pytest.fixture
     def service(self, mock_services):
-        """Create EnhancedConversationService with mocked dependencies."""
-        with patch('app.services.enhanced_conversation_service.ContextualBackstoryService') as mock_backstory, \
-             patch('app.services.enhanced_conversation_service.ConversationPromptService') as mock_prompt, \
-             patch('app.services.enhanced_conversation_service.StateInfluenceService') as mock_influence, \
-             patch('app.services.enhanced_conversation_service.StateManagerService') as mock_state, \
-             patch('app.services.enhanced_conversation_service.SimpleOpenAIService') as mock_simple, \
-             patch('app.services.enhanced_conversation_service.OpenAI') as mock_openai:
+        """Create ClaraConversationService with mocked dependencies."""
+        with patch('app.services.clara_conversation_service.CharacterContentService') as mock_backstory, \
+             patch('app.services.clara_conversation_service.ConversationPromptService') as mock_prompt, \
+             patch('app.services.clara_conversation_service.StateInfluenceService') as mock_influence, \
+             patch('app.services.clara_conversation_service.StateManagerService') as mock_state, \
+             patch('app.services.clara_conversation_service.AsyncOpenAI') as mock_openai:
 
-            mock_backstory.return_value = mock_services['contextual_backstory_service']
+            mock_backstory.return_value = mock_services['character_content_service']
             mock_prompt.return_value = mock_services['conversation_prompt_service']
             mock_influence.return_value = mock_services['state_influence_service']
             mock_state.return_value = mock_services['state_manager_service']
-            mock_simple.return_value = mock_services['simple_openai_service']
             mock_openai.return_value = mock_services['openai_client']
 
-            service = EnhancedConversationService()
+            service = ClaraConversationService()
             return service, mock_services
 
     @pytest.mark.asyncio
@@ -67,7 +63,7 @@ class TestEnhancedConversationService:
                 "hours_ago": 2
             }
         ]
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Character backstory content",
             "content_types": ["character_gist"],
             "char_count": 500,
@@ -102,20 +98,15 @@ class TestEnhancedConversationService:
         assert "simulation_context" in result
 
     @pytest.mark.asyncio
-    async def test_fallback_to_simple_service(self, service):
-        """Test fallback to SimpleOpenAIService when enhanced context fails."""
+    async def test_fallback_to_inline_response(self, service):
+        """Test fallback to the inline _fallback_response when enhanced context fails."""
         enhanced_service, mocks = service
 
         # Make context gathering fail
         mocks['state_manager_service'].get_current_global_state.side_effect = Exception("Database error")
 
         # Setup fallback response
-        fallback_response = Mock()
-        fallback_response.ai_response = "Fallback response"
-        fallback_response.corrected_transcript = "How are you feeling today?"
-        fallback_response.word_usage_status = "NOT_USED"
-        fallback_response.usage_correctness_feedback = None
-        mocks['simple_openai_service'].generate_coaching_response.return_value = fallback_response
+        enhanced_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="How are you feeling today?",
@@ -146,7 +137,7 @@ class TestEnhancedConversationService:
 
         mocks['state_manager_service'].get_current_global_state.side_effect = delayed_global_state
         mocks['state_manager_service'].get_recent_events.side_effect = delayed_events
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": ["character_gist"],
             "char_count": 100,
@@ -188,7 +179,7 @@ class TestEnhancedConversationService:
         # Setup mock responses
         mocks['state_manager_service'].get_current_global_state.return_value = {}
         mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": [],
             "char_count": 0,
@@ -208,7 +199,7 @@ class TestEnhancedConversationService:
         mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
 
         # This should log a warning about exceeding threshold
-        with patch('app.services.enhanced_conversation_service.logger') as mock_logger:
+        with patch('app.services.clara_conversation_service.logger') as mock_logger:
             result = await enhanced_service.generate_enhanced_response(
                 user_message="Test",
                 user_id="user123",
@@ -246,7 +237,7 @@ class TestEnhancedConversationService:
                 "impact_mood": "positive"
             }
         ]
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Ava loves creative projects and collaboration",
             "content_types": ["positive_memories", "character_gist"],
             "char_count": 800,
@@ -282,69 +273,6 @@ class TestEnhancedConversationService:
         assert simulation_context["conversation_emotion"] == "excited"
 
     @pytest.mark.asyncio
-    async def test_word_usage_evaluation(self, service):
-        """Test word usage evaluation functionality."""
-        enhanced_service, mocks = service
-
-        # Setup basic context
-        mocks['state_manager_service'].get_current_global_state.return_value = {}
-        mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
-            "content": "Content",
-            "content_types": [],
-            "char_count": 100,
-            "estimated_tokens": 25
-        }
-        mocks['state_influence_service'].build_conversation_context.return_value = {}
-
-        # Setup OpenAI mock
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "That's a sophisticated approach!"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
-            Mock(value="neutral"), "Neutral"
-        )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
-
-        result = await enhanced_service.generate_enhanced_response(
-            user_message="I used sophisticated methods to solve the problem",
-            user_id="user123",
-            conversation_id="conv456",
-            suggested_word="sophisticated"
-        )
-
-        assert result["word_usage_status"].value == "used_correctly"
-        assert result["usage_correctness_feedback"] is None
-
-    @pytest.mark.asyncio
-    async def test_context_summary_functionality(self, service):
-        """Test get_context_summary functionality."""
-        enhanced_service, mocks = service
-
-        # Setup mocks for context summary
-        mocks['state_influence_service'].get_state_influence_summary = AsyncMock(return_value={
-            "primary_influences": ["mood (85/100)"],
-            "overall_state_impact": "significant"
-        })
-        mocks['state_manager_service'].get_current_global_state.return_value = {
-            "mood": {"numeric_value": 85}
-        }
-        mocks['contextual_backstory_service'].get_cache_status.return_value = {
-            "cached_content_types": ["character_gist"],
-            "cache_size": 1
-        }
-
-        result = await enhanced_service.get_context_summary("user123", "conv456")
-
-        assert "state_influence" in result
-        assert "global_state_available" in result
-        assert "backstory_cache" in result
-        assert "config" in result
-        assert result["global_state_available"] == True
-
-    @pytest.mark.asyncio
     async def test_error_recovery(self, service):
         """Test error recovery and graceful degradation."""
         enhanced_service, mocks = service
@@ -352,16 +280,11 @@ class TestEnhancedConversationService:
         # Make everything fail except fallback
         mocks['state_manager_service'].get_current_global_state.side_effect = Exception("DB error")
         mocks['state_manager_service'].get_recent_events.side_effect = Exception("DB error")
-        mocks['contextual_backstory_service'].select_relevant_content.side_effect = Exception("File error")
+        mocks['character_content_service'].select_relevant_content.side_effect = Exception("File error")
         mocks['state_influence_service'].build_conversation_context.side_effect = Exception("Context error")
 
         # Setup working fallback
-        fallback_response = Mock()
-        fallback_response.ai_response = "Fallback response"
-        fallback_response.corrected_transcript = "Test message"
-        fallback_response.word_usage_status = "NOT_USED"
-        fallback_response.usage_correctness_feedback = None
-        mocks['simple_openai_service'].generate_coaching_response.return_value = fallback_response
+        enhanced_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="Test message",
@@ -390,7 +313,7 @@ class TestEnhancedConversationService:
         # Setup mocks
         mocks['state_manager_service'].get_current_global_state.return_value = {}
         mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['contextual_backstory_service'].select_relevant_content.return_value = {
+        mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": [],
             "char_count": 100,
@@ -425,3 +348,84 @@ class TestEnhancedConversationService:
             scenario=mocks['state_influence_service'].build_conversation_context.call_args[1]["scenario"],
             user_preferences=user_preferences
         )
+
+
+class TestAwaitRegression:
+    """Regression lock for the missing-await bug: the non-streaming path must
+    return enhanced output, not silently degrade to the fallback service.
+
+    Hermetic: every constructor dependency is patched."""
+
+    @pytest.fixture
+    def hermetic_service(self):
+        deps = {
+            'character_content_service': Mock(
+                select_relevant_content=AsyncMock(return_value={
+                    "content": "backstory", "content_types": ["character_gist"],
+                    "char_count": 9, "estimated_tokens": 3,
+                })
+            ),
+            'conversation_prompt_service': Mock(),
+            'state_influence_service': Mock(
+                build_conversation_context=AsyncMock(return_value={"mood_influence": {"tone": "warm"}})
+            ),
+            'state_manager_service': Mock(
+                get_current_global_state=AsyncMock(return_value={
+                    "mood": {"numeric_value": 70}, "stress": {"numeric_value": 30},
+                    "energy": {"numeric_value": 60},
+                })
+            ),
+            'session_state_service': Mock(
+                add_conversation_message=AsyncMock(),
+                get_conversation_history=AsyncMock(return_value=[]),
+            ),
+            'event_selection_service': Mock(
+                get_contextual_events=AsyncMock(return_value=[
+                    {"id": "ev1", "summary": "Had coffee with Mel", "hours_ago": 3}
+                ]),
+                mark_events_used=AsyncMock(),
+            ),
+        }
+        emotion = Mock()
+        emotion.value = "happy"
+        deps['conversation_prompt_service'].select_conversation_emotion_with_mood.return_value = (
+            emotion, "user is upbeat"
+        )
+        deps['conversation_prompt_service'].construct_conversation_prompt_with_mood.return_value = "BASE PROMPT"
+
+        openai_client = Mock()
+        completion = Mock()
+        completion.choices = [Mock()]
+        completion.choices[0].message.content = '{"message": "hi", "emotion": "happy"}'
+        openai_client.chat.completions.create = AsyncMock(return_value=completion)
+
+        with patch.multiple(
+            'app.services.clara_conversation_service',
+            CharacterContentService=Mock(return_value=deps['character_content_service']),
+            ConversationPromptService=Mock(return_value=deps['conversation_prompt_service']),
+            StateInfluenceService=Mock(return_value=deps['state_influence_service']),
+            StateManagerService=Mock(return_value=deps['state_manager_service']),
+            SessionStateService=Mock(return_value=deps['session_state_service']),
+            EventSelectionService=Mock(return_value=deps['event_selection_service']),
+            AsyncOpenAI=Mock(return_value=openai_client),
+        ):
+            service = ClaraConversationService()
+        # Fallback must stay untouched on the enhanced path
+        service._fallback_response = AsyncMock(return_value="FALLBACK")
+        return service, deps, openai_client
+
+    @pytest.mark.asyncio
+    async def test_non_streaming_returns_enhanced_not_fallback(self, hermetic_service):
+        service, deps, openai_client = hermetic_service
+
+        result = await service.generate_enhanced_response(
+            user_message="How was your day?",
+            user_id="user123",
+            conversation_id="conv789",
+        )
+
+        assert result["enhanced_mode"] is True
+        assert result["fallback_mode"] is False
+        assert result["ai_response"] == "hi"
+        openai_client.chat.completions.create.assert_awaited_once()
+        service._fallback_response.assert_not_called()

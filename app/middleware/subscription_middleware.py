@@ -16,8 +16,6 @@ class SubscriptionMiddleware(BaseHTTPMiddleware):
     
     SUBSCRIPTION_REQUIRED_PATHS = [
         "/api/clara/conversation",
-        "/api/conversation",
-        "/api/sessions/create",
         # Add more paths that require subscriptions
     ]
     

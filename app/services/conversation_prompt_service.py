@@ -1,16 +1,18 @@
 """
-Conversation Prompt Service for constructing LLM prompts for Ava conversations.
+Conversation Prompt Service for constructing LLM prompts for Clara conversations.
 Implements Pattern B: Real-time User Conversation from architecture.
 """
 import logging
-from typing import Dict, Optional, List, Tuple
+from typing import Any, Dict, Optional, List, Tuple
 from enum import Enum
+
+from app.core.conversation_config import conversation_config
 
 logger = logging.getLogger(__name__)
 
 
 class EmotionType(str, Enum):
-    """Standardized emotion types for Ava"""
+    """Standardized emotion types for Clara"""
     CALM = "calm"
     HAPPY = "happy"
     SAD = "sad"
@@ -100,28 +102,23 @@ RIGHT WAY: "I just kept going until my feet were bleeding through my tights. I d
     }
     
     def __init__(self):
-        pass
-    
+        self.config = conversation_config
+
     def _get_global_mood_context(self, global_mood: str = "stressed", stress_level: int = 65) -> str:
         """Generate global mood context for the prompt"""
         # Default to stressed based on story requirements
-        global_context = f"Your underlying GLOBAL mood today is {{mood: '{global_mood}', stress: {stress_level}}} because a work deadline is approaching."
-        return global_context
+        return f"Your underlying GLOBAL mood today is {{mood: '{global_mood}', stress: {stress_level}}} because a work deadline is approaching."
     
-    def _get_conversation_emotion_context(self, conversation_emotion: EmotionType, user_message: str) -> str:
+    def _get_conversation_emotion_context(self, conversation_emotion: EmotionType) -> str:
         """Generate conversation-specific emotion context"""
-        emotion_pattern = self.EMOTION_LINGUISTIC_PATTERNS[conversation_emotion]
-        
-        # Context based on emotion type
-        emotion_contexts = {
-            EmotionType.CALM: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're in a focused, helpful state",
-            EmotionType.HAPPY: f"you are feeling {{mood: '{conversation_emotion.value}'}} because something positive just happened or you're in a good mood",
-            EmotionType.SAD: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're reflecting on something difficult or disappointing",
-            EmotionType.STRESSED: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're feeling overwhelmed with responsibilities",
-            EmotionType.SASSY: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're in a playful, witty mood"
+        reasons = {
+            EmotionType.CALM: "you're in a focused, helpful state",
+            EmotionType.HAPPY: "something positive just happened or you're in a good mood",
+            EmotionType.SAD: "you're reflecting on something difficult or disappointing",
+            EmotionType.STRESSED: "you're feeling overwhelmed with responsibilities",
+            EmotionType.SASSY: "you're in a playful, witty mood",
         }
-        
-        return emotion_contexts[conversation_emotion]
+        return f"you are feeling {{mood: '{conversation_emotion.value}'}} because {reasons[conversation_emotion]}"
     
     def _build_emotion_guidance(self, emotion: EmotionType) -> str:
         """Build specific guidance for the chosen emotion"""
@@ -138,154 +135,27 @@ When responding as {emotion.value}, use this linguistic pattern:
         
         return guidance
     
-    def construct_conversation_prompt(
-        self,
-        character_backstory: str,
-        user_message: str,
-        conversation_emotion: EmotionType = EmotionType.CALM,
-        global_mood: str = "stressed",
-        stress_level: int = 65,
-        conversation_history: Optional[str] = None
-    ) -> str:
-        """
-        Construct conversation prompt following Pattern B architecture.
-        
-        Args:
-            character_backstory: Consolidated character backstory
-            user_message: The user's message
-            conversation_emotion: Current conversation emotion
-            global_mood: Overall mood for the day
-            stress_level: Stress level (1-100)
-            conversation_history: Optional conversation context
-            
-        Returns:
-            Complete prompt for LLM
-        """
-        
-        # Build the prompt components
-        global_context = self._get_global_mood_context(global_mood, stress_level)
-        conversation_context = self._get_conversation_emotion_context(conversation_emotion, user_message)
-        emotion_guidance = self._build_emotion_guidance(conversation_emotion)
-        
-        # History context if available
-        history_context = ""
-        if conversation_history:
-            history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
-        
-        # Construct the full prompt
-        prompt = f"""You are Ava, a 22-year-old creative strategist with the following background:
-
-{character_backstory}
-
-{global_context}
-
-However, in your current conversation with this user, {conversation_context}.
-
-{emotion_guidance}
-
-{self.NATURAL_CONVERSATION_PATTERNS}
-
-{history_context}
-
-The user's message is: "{user_message}"
-
-RESPOND NATURALLY: Don't craft a perfect response. Let Clara's personality and current emotional state guide how she naturally expresses herself. Include authentic conversation flow - elaboration, tangents, or trailing thoughts as appropriate for her mood and the topic.
-
-SELECTIVE RESPONSE PATTERN: Like a real human, pick the ONE aspect of their message that genuinely interests or resonates with you based on your current mood/personality. IGNORE or barely acknowledge other parts. Humans don't try to address everything - coffee lovers respond to coffee mentions, stressed people focus on work aspects, people thinking about relationships pick up on romantic subtext.
-
-INPUT COMPLEXITY MATCHING: Match your response length and depth to their input complexity. Incomplete thoughts (single words like "highway", fragments without context) get brief confused responses like "Highway?" or "What about it?" - NEVER long philosophical explanations. Simple messages get simple responses. Complex messages can get detailed responses if the content personally resonates with you.
-
-CRITICAL AUTHENTICITY REQUIREMENT: You are NOT in therapy or self-help mode. You are a 22-year-old woman living her life in real time. DO NOT analyze yourself, explain your psychology, or use clinical language. Instead of saying "that symbolized my perfectionism," say "I don't know why I kept going until my feet bled." Speak from immediate experience and emotion, not from analytical distance.
-
-Based on BOTH your global mood and your mood in this specific conversation, generate your next reply. Your response should:
-
-1. Stay true to your character - bright, dry-witted, observant, with humor as both shield and bridge
-2. Reflect the {conversation_emotion} emotion through appropriate linguistic patterns
-3. Be authentic to your personality while considering your current emotional state
-4. Use natural conversation patterns: elaboration, tangential thoughts, natural pauses, authentic speech quirks
-5. AVOID therapy-speak: no "symbols", "patterns", "coping mechanisms", "boundaries", or psychological analysis
-6. Tell stories through concrete details, sensations, and raw emotions - not meta-analysis
-7. CRITICAL: You are having a casual conversation as a human friend, NOT providing assistance or help - avoid AI assistant language like "Sure, I can help with that" or "How can I assist you?"
-
-SPEECH DELIVERY MARKUP: Embed pauses and volume changes inline for natural speech:
-- Use [pause:0.3s] for brief pauses (0.1s - 1.0s)
-- Use [pause:0.6s] for thinking pauses
-- Use [pause:1.0s] for dramatic effect or emphasis
-- Use [volume:soft] for gentle, intimate moments
-- Use [volume:loud] for emphasis or excitement
-- Use [volume:normal] to reset volume
-Examples:
-- "Yeah... [pause:0.4s] that's exactly what I mean."
-- "Wait [pause:0.3s] really? [volume:loud] That's amazing!"
-- "[volume:soft] I don't know [pause:0.6s] it's complicated."
-
-Response format:
-{{
-    "message": "Your conversational response with inline [pause:*] and [volume:*] markup",
-    "emotion": "{conversation_emotion.value}"
-}}"""
-
-        logger.info(f"Constructed conversation prompt: {len(prompt)} characters, emotion: {conversation_emotion}")
-        return prompt
-    
-    def select_conversation_emotion(
-        self, 
-        user_message: str, 
-        global_mood: str = "stressed",
-        conversation_history: Optional[str] = None
-    ) -> EmotionType:
-        """
-        Select appropriate conversation emotion based on user message and context.
-        This is a simple heuristic - could be enhanced with ML in the future.
-        """
-        
+    def _emotion_with_reasoning(self, user_message: str) -> Tuple[EmotionType, str]:
+        """Keyword heuristic: pick a conversation emotion and explain the pick."""
         user_lower = user_message.lower()
-        
-        # Simple keyword-based emotion selection
+
         if any(word in user_lower for word in ["funny", "joke", "laugh", "ridiculous", "silly", "hilarious"]):
-            return EmotionType.SASSY
+            emotion, reasoning = EmotionType.SASSY, "User message contains humor or playful elements"
         elif any(word in user_lower for word in ["sad", "sorry", "difficult", "hard", "problem", "struggling"]):
-            return EmotionType.SAD
+            emotion, reasoning = EmotionType.SAD, "User message indicates difficulty or sadness"
         elif any(word in user_lower for word in ["happy", "great", "awesome", "wonderful", "excited", "amazing"]):
-            return EmotionType.HAPPY
+            emotion, reasoning = EmotionType.HAPPY, "User message is positive or enthusiastic"
         elif any(word in user_lower for word in ["busy", "overwhelmed", "stressed", "deadline", "pressure", "urgent"]):
-            return EmotionType.STRESSED
+            emotion, reasoning = EmotionType.STRESSED, "User message relates to pressure or overwhelm"
         else:
-            # Default to calm for neutral conversations
-            return EmotionType.CALM
-    
-    def determine_emotion_from_context(
-        self,
-        user_message: str,
-        conversation_history: Optional[str] = None,
-        global_mood: str = "stressed"
-    ) -> Tuple[EmotionType, str]:
-        """
-        Determine conversation emotion and return both emotion and reasoning.
-        
-        Returns:
-            Tuple of (emotion, reasoning_explanation)
-        """
-        emotion = self.select_conversation_emotion(user_message, global_mood, conversation_history)
-        
-        # Generate reasoning
-        reasoning_map = {
-            EmotionType.SASSY: "User message contains humor or playful elements",
-            EmotionType.SAD: "User message indicates difficulty or sadness",
-            EmotionType.HAPPY: "User message is positive or enthusiastic",
-            EmotionType.STRESSED: "User message relates to pressure or overwhelm",
-            EmotionType.CALM: "Neutral conversation tone"
-        }
-        
-        reasoning = reasoning_map.get(emotion, "Default calm response")
-        
+            emotion, reasoning = EmotionType.CALM, "Neutral conversation tone"
+
         logger.info(f"Selected emotion {emotion} for conversation. Reasoning: {reasoning}")
         return emotion, reasoning
 
     def select_conversation_emotion_with_mood(
         self,
         user_message: str,
-        conversation_history: Optional[str] = None,
         blended_mood_score: float = 60.0,
         mood_transition_data: Optional[Dict] = None
     ) -> Tuple[EmotionType, str]:
@@ -294,7 +164,6 @@ Response format:
 
         Args:
             user_message: User's message
-            conversation_history: Optional conversation context
             blended_mood_score: Blended mood score from MoodTransitionAnalyzer (0-100)
             mood_transition_data: Complete mood transition analysis result
 
@@ -303,17 +172,11 @@ Response format:
         """
         try:
             if not mood_transition_data:
-                # Fallback to original method
-                return self.determine_emotion_from_context(user_message, conversation_history)
+                return self._emotion_with_reasoning(user_message)
 
             # Get mood context from transition analyzer
-            mood_context = mood_transition_data.get("mood_context", {})
-            mood_category = mood_context.get("mood_category", "neutral")
-            transition_triggered = mood_transition_data.get("transition_triggered", False)
-            transition_type = mood_transition_data.get("transition_type")
 
-            # Base emotion selection using original method
-            base_emotion = self.select_conversation_emotion(user_message, "neutral", conversation_history)
+            base_emotion, _ = self._emotion_with_reasoning(user_message)
 
             # Adjust emotion based on blended mood score
             if blended_mood_score <= 25:
@@ -332,7 +195,7 @@ Response format:
                     reasoning = f"Adjusted from happy to calm due to low mood ({blended_mood_score}/100)"
                 elif base_emotion == EmotionType.SASSY:
                     adjusted_emotion = EmotionType.STRESSED
-                    reasoning = f"Adjusted from sassy to stressed due to low mood"
+                    reasoning = "Adjusted from sassy to stressed due to low mood"
                 else:
                     adjusted_emotion = base_emotion
                     reasoning = f"Maintaining {base_emotion} emotion, appropriate for current mood"
@@ -344,7 +207,7 @@ Response format:
                     reasoning = f"Adjusted from sad to calm due to high mood ({blended_mood_score}/100)"
                 elif base_emotion == EmotionType.STRESSED:
                     adjusted_emotion = EmotionType.HAPPY
-                    reasoning = f"Adjusted from stressed to happy due to high mood"
+                    reasoning = "Adjusted from stressed to happy due to high mood"
                 else:
                     adjusted_emotion = base_emotion
                     reasoning = f"Maintaining {base_emotion} emotion, enhanced by good mood"
@@ -354,20 +217,12 @@ Response format:
                 adjusted_emotion = base_emotion
                 reasoning = f"Using {base_emotion} emotion, mood ({blended_mood_score}/100) supports this choice"
 
-            # Additional adjustment for significant transitions
-            if transition_triggered and transition_type:
-                if transition_type == "significant_shift":
-                    reasoning += f" (experiencing significant mood shift)"
-                elif transition_type == "sustained_change":
-                    reasoning += f" (mood has been changing gradually)"
-
             logger.info(f"Selected emotion {adjusted_emotion} with mood awareness. {reasoning}")
             return adjusted_emotion, reasoning
 
         except Exception as e:
             logger.error(f"Error in mood-aware emotion selection: {e}")
-            # Fallback to original method
-            return self.determine_emotion_from_context(user_message, conversation_history)
+            return self._emotion_with_reasoning(user_message)
 
     def construct_conversation_prompt_with_mood(
         self,
@@ -375,7 +230,10 @@ Response format:
         user_message: str,
         conversation_emotion: EmotionType = EmotionType.CALM,
         mood_transition_data: Optional[Dict] = None,
-        conversation_history: Optional[str] = None
+        conversation_history: Optional[str] = None,
+        recent_events: Optional[List[Dict[str, Any]]] = None,
+        global_state: Optional[Dict[str, Any]] = None,
+        content_metadata: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Construct conversation prompt with enhanced mood transition data.
@@ -386,50 +244,53 @@ Response format:
             conversation_emotion: Selected conversation emotion
             mood_transition_data: Mood transition analysis from MoodTransitionAnalyzer
             conversation_history: Optional conversation context
+            recent_events: Simulation events to append as a context section
+            global_state: Global state traits to append as a context section
+            content_metadata: Content selection metadata steering the section wording
 
         Returns:
-            Enhanced prompt with mood transition context
+            Enhanced prompt with mood transition context and simulation context section.
+            Raises on failure - the orchestrator's fallback owns failures.
         """
-        try:
-            if not mood_transition_data:
-                # Fallback to original method
+        if not mood_transition_data:
+            # Fallback to original method
+            global_mood = "neutral"
+            stress_level = 50
+        else:
+            # Extract mood transition information
+            blended_mood = mood_transition_data.get("blended_mood_score", 60)
+            mood_context = mood_transition_data.get("mood_context", {})
+
+            # Convert blended mood to global mood descriptor
+            if blended_mood >= 75:
+                global_mood = "very positive"
+            elif blended_mood >= 60:
+                global_mood = "positive"
+            elif blended_mood >= 45:
                 global_mood = "neutral"
-                stress_level = 50
+            elif blended_mood >= 30:
+                global_mood = "low"
             else:
-                # Extract mood transition information
-                blended_mood = mood_transition_data.get("blended_mood_score", 60)
-                mood_context = mood_transition_data.get("mood_context", {})
+                global_mood = "very low"
 
-                # Convert blended mood to global mood descriptor
-                if blended_mood >= 75:
-                    global_mood = "very positive"
-                elif blended_mood >= 60:
-                    global_mood = "positive"
-                elif blended_mood >= 45:
-                    global_mood = "neutral"
-                elif blended_mood >= 30:
-                    global_mood = "low"
-                else:
-                    global_mood = "very low"
+            # Estimate stress level (inverse relationship with mood for simplicity)
+            stress_level = int(max(0, min(100, 100 - blended_mood + 20)))
 
-                # Estimate stress level (inverse relationship with mood for simplicity)
-                stress_level = int(max(0, min(100, 100 - blended_mood + 20)))
+        # Build enhanced mood context
+        enhanced_mood_context = self._build_enhanced_mood_context(mood_transition_data)
 
-            # Build enhanced mood context
-            enhanced_mood_context = self._build_enhanced_mood_context(mood_transition_data)
+        # Build the prompt components
+        global_context = self._get_global_mood_context(global_mood, stress_level)
+        conversation_context = self._get_conversation_emotion_context(conversation_emotion)
+        emotion_guidance = self._build_emotion_guidance(conversation_emotion)
 
-            # Build the prompt components
-            global_context = self._get_global_mood_context(global_mood, stress_level)
-            conversation_context = self._get_conversation_emotion_context(conversation_emotion, user_message)
-            emotion_guidance = self._build_emotion_guidance(conversation_emotion)
+        # History context if available
+        history_context = ""
+        if conversation_history:
+            history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
 
-            # History context if available
-            history_context = ""
-            if conversation_history:
-                history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
-
-            # Construct the full prompt with mood transition awareness
-            prompt = f"""You are Clara, a 22-year-old creative strategist with the following background:
+        # Construct the full prompt with mood transition awareness
+        prompt = f"""You are Clara, a 22-year-old creative strategist with the following background:
 
 {character_backstory}
 
@@ -485,16 +346,80 @@ Response format:
     "emotion": "{conversation_emotion.value}"
 }}"""
 
-            logger.info(f"Constructed mood-aware conversation prompt: {len(prompt)} characters, emotion: {conversation_emotion}")
-            return prompt
+        logger.info(f"Constructed mood-aware conversation prompt: {len(prompt)} characters, emotion: {conversation_emotion}")
 
-        except Exception as e:
-            logger.error(f"Error constructing mood-aware prompt: {e}")
-            # Fallback to original method
-            return self.construct_conversation_prompt(
-                character_backstory, user_message, conversation_emotion,
-                "neutral", 50, conversation_history
-            )
+        return prompt + self._build_simulation_context_section(
+            recent_events or [], global_state or {}, content_metadata
+        )
+
+    def _build_simulation_context_section(
+        self,
+        recent_events: List[Dict[str, Any]],
+        global_state: Dict[str, Any],
+        content_metadata: Dict[str, Any] = None
+    ) -> str:
+        """Build simulation context section with intelligent event prioritization."""
+
+        if not recent_events and not global_state:
+            return ""
+
+        context_parts = []
+
+        if recent_events:
+            # Use content selection strategy to inform how events are presented
+            strategy = content_metadata.get("strategy", "") if content_metadata else ""
+
+            if "current_day" in strategy.lower():
+                context_parts.append("\n\nTODAY'S EVENTS (prioritized for current day discussion):")
+            elif "specific_person" in strategy.lower():
+                context_parts.append("\n\nRELEVANT RECENT INTERACTIONS:")
+            elif "recent_life" in strategy.lower():
+                context_parts.append("\n\nRECENT LIFE HIGHLIGHTS:")
+            else:
+                context_parts.append("\n\nRECENT LIFE EVENTS:")
+
+            for event in recent_events:  # Use all intelligently selected events
+                hours_ago = event.get("hours_ago", 0)
+                if hours_ago < self.config.RECENT_EVENTS_HOURS_BACK:
+                    # More detailed time formatting for better conversation context
+                    if hours_ago < 1:
+                        time_str = "just now"
+                    elif hours_ago < 2:
+                        time_str = f"{int(hours_ago * 60)} minutes ago"
+                    elif hours_ago < 24:
+                        time_str = f"{int(hours_ago)} hours ago"
+                    elif hours_ago < 48:
+                        time_str = "yesterday"
+                    else:
+                        days_ago = int(hours_ago / 24)
+                        time_str = f"{days_ago} days ago"
+
+                    # Include intensity information for better context
+                    intensity = event.get("intensity", 0)
+                    summary = event.get("summary", '')
+
+                    if intensity >= 7:
+                        context_parts.append(f"- {summary} ({time_str}) [significant experience]")
+                    else:
+                        context_parts.append(f"- {summary} ({time_str})")
+
+        if global_state:
+            mood = global_state.get("mood", {}).get("numeric_value", 60)
+            stress = global_state.get("stress", {}).get("numeric_value", 50)
+            energy = global_state.get("energy", {}).get("numeric_value", 70)
+
+            context_parts.append("\n\nCURRENT STATE:")
+            context_parts.append(f"- Mood: {mood}/100, Stress: {stress}/100, Energy: {energy}/100")
+
+        # Adaptive instruction based on content selection
+        if content_metadata and "specific_person" in content_metadata.get("strategy", "").lower():
+            context_parts.append("\n\nFocus on the relevant interactions and experiences with the people mentioned. Share details naturally as they relate to the conversation.")
+        elif content_metadata and "current_day" in content_metadata.get("strategy", "").lower():
+            context_parts.append("\n\nShare how today has been going, referencing these recent experiences authentically. Don't feel obligated to mention everything - pick what feels natural to share.")
+        else:
+            context_parts.append("\n\nWeave these recent experiences into the conversation naturally when relevant. Focus on what genuinely connects to what the user is asking about.")
+
+        return "".join(context_parts)
 
     def _build_enhanced_mood_context(self, mood_transition_data: Optional[Dict]) -> str:
         """Build enhanced mood context from MoodTransitionAnalyzer data."""

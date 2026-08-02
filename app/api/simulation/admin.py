@@ -333,11 +333,11 @@ async def get_recent_events(
 
 
 @router.get("/state/current")
-async def get_current_ava_state(
+async def get_current_clara_state(
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Get Ava's current global state.
+    Get Clara's current global state.
     Requires authentication.
     """
     if not current_user:
@@ -354,14 +354,14 @@ async def get_current_ava_state(
 
         return {
             "timestamp": datetime.utcnow().isoformat(),
-            "ava_global_state": current_state
+            "clara_global_state": current_state
         }
 
     except Exception as e:
-        logger.error(f"Error getting current Ava state: {e}")
+        logger.error(f"Error getting current Clara state: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get current Ava state"
+            detail="Failed to get current Clara state"
         )
 
 
@@ -370,7 +370,7 @@ async def initialize_default_states(
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Initialize default states for Ava's global traits.
+    Initialize default states for Clara's global traits.
     Requires authentication.
     """
     if not current_user:

@@ -2,14 +2,14 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from app.api import auth, conversation, vocabulary, feedback, sessions, clara, subscriptions, state
+from app.api import clara, subscriptions, state
 from app.api.simulation import admin as simulation_admin
 from app.api.admin import journal as admin_journal
 from app.core.config import settings
 from app.middleware.subscription_middleware import SubscriptionMiddleware
 
 app = FastAPI(
-    title="Improv Today API",
+    title="Clara API",
     version="1.0.0",
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None if settings.is_production else "/redoc",
@@ -33,13 +33,7 @@ app.add_middleware(
 app.add_middleware(SubscriptionMiddleware)
 
 # Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-app.include_router(conversation.router, prefix="/api/conversation", tags=["conversation"])
 app.include_router(clara.router, prefix="/api/clara", tags=["clara"])
-
-app.include_router(vocabulary.router, prefix="/api/vocabulary", tags=["vocabulary"])
-app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
 app.include_router(subscriptions.router, prefix="/api", tags=["subscriptions"])
 
 # Simulation engine admin routes
@@ -55,7 +49,7 @@ app.include_router(state.router, tags=["state"])
 
 @app.get("/")
 async def root():
-    return {"message": "Improv Today API"}
+    return {"message": "Clara API"}
 
 @app.get("/health")
 async def health_check():
@@ -66,10 +60,10 @@ async def health_check():
 async def startup_event():
     """Initialize services on application startup"""
     logger = logging.getLogger("app.startup")
-    logger.info("Initializing ImprovToday backend services...")
+    logger.info("Initializing Clara backend services...")
     
     # Import models to ensure they're registered with Base
-    from app.models import conversation_v2, user, session, vocabulary, clara_state
+    from app.models import user, clara_state
     # Models imported for SQLAlchemy registration
     
     # Initialize database tables
@@ -86,18 +80,16 @@ async def startup_event():
     
     # API endpoints ready
     logger.info("HTTP API endpoints available:")
-    logger.info("  - /api/conversation - Main conversation endpoint")
-    logger.info("  - /api/sessions - Session management")
-    logger.info("  - /api/auth - Authentication")
-    
-    logger.info("ImprovToday backend startup complete")
+    logger.info("  - /api/clara - Main conversation endpoint")
+
+    logger.info("Clara backend startup complete")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup services on application shutdown"""
     logger = logging.getLogger("app.shutdown")
-    logger.info("Shutting down ImprovToday backend services...")
+    logger.info("Shutting down Clara backend services...")
     
     # Cleanup would go here if needed
-    logger.info("ImprovToday backend shutdown complete")
+    logger.info("Clara backend shutdown complete")

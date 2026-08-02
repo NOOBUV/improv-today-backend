@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -64,7 +65,8 @@ class SubscriptionGuard:
 
             return has_access
 
-        except Exception as e:
+        except SQLAlchemyError as e:
+            # Fail closed: a database problem denies access, it never grants it.
             logger.error(f"Error checking subscription status for user {user.id}: {str(e)}")
             return False
 
@@ -108,7 +110,8 @@ def require_active_subscription(
             else:
                 detail = "Access denied. Please check your subscription status."
                 
-        except Exception:
+        except (SQLAlchemyError, AttributeError):
+            # AttributeError: current_user is None when called outside the Depends chain
             detail = "Access denied. Please check your subscription status."
         
         raise HTTPException(
@@ -149,7 +152,7 @@ def subscription_access_optional(
             db, current_user.id
         )
         subscription_status = subscription_status_obj.status
-    except Exception:
+    except SQLAlchemyError:
         subscription_status = "error"
     
     return {

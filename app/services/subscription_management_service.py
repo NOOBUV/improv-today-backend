@@ -2,8 +2,11 @@
 import logging
 from typing import Optional, List
 from datetime import datetime, timezone
+from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, and_
+from sqlalchemy.exc import SQLAlchemyError
+from stripe.error import StripeError
 
 from app.models.subscription import SubscriptionPlan, UserSubscription, PaymentRecord
 from app.models.user import User
@@ -235,7 +238,8 @@ class SubscriptionManagementService:
                 status=subscription.status
             )
 
-        except Exception as e:
+        except (SQLAlchemyError, TypeError, ValueError) as e:
+            # TypeError: period/trial dates compared against missing or malformed values
             logger.error(f"Failed to check subscription status for user {user_id}: {str(e)}")
             return SubscriptionStatus(
                 is_active=False,
@@ -243,7 +247,7 @@ class SubscriptionManagementService:
                 status="error"
             )
 
-    def cancel_user_subscription(
+    async def cancel_user_subscription(
         self,
         db: Session,
         user_id: int,
@@ -253,16 +257,17 @@ class SubscriptionManagementService:
         Cancel user's subscription.
         """
         subscription = self.get_user_active_subscription(db, user_id)
-        
+
         if not subscription or not subscription.stripe_subscription_id:
             return None
-        
+
         try:
-            # Cancel in Stripe
-            self.stripe_service.cancel_subscription(
+            # Cancel in Stripe FIRST: a raise here must leave the local row untouched,
+            # otherwise we mark a subscription canceled that Stripe keeps billing.
+            await self.stripe_service.cancel_subscription(
                 subscription.stripe_subscription_id, at_period_end
             )
-            
+
             # Update local database
             if at_period_end:
                 subscription.cancel_at_period_end = True
@@ -277,7 +282,8 @@ class SubscriptionManagementService:
             logger.info(f"Cancelled subscription {subscription.id} for user {user_id}")
             return subscription
             
-        except Exception as e:
+        except (SQLAlchemyError, StripeError, HTTPException, ValueError) as e:
+            # ValueError: StripeService() refuses to build without STRIPE_SECRET_KEY
             logger.error(f"Failed to cancel subscription for user {user_id}: {str(e)}")
             return None
 
@@ -321,7 +327,7 @@ class SubscriptionManagementService:
         logger.info(f"Recorded payment: {payment.id} for user {user_id}")
         return payment
 
-    def sync_subscription_from_stripe(
+    async def sync_subscription_from_stripe(
         self,
         db: Session,
         stripe_subscription_id: str
@@ -331,7 +337,7 @@ class SubscriptionManagementService:
         """
         try:
             # Get subscription from Stripe
-            stripe_sub = self.stripe_service.get_subscription(stripe_subscription_id)
+            stripe_sub = await self.stripe_service.get_subscription(stripe_subscription_id)
             
             # Find local subscription
             result = db.execute(
@@ -357,7 +363,8 @@ class SubscriptionManagementService:
             logger.info(f"Synced subscription {local_sub.id} from Stripe")
             return local_sub
             
-        except Exception as e:
+        except (SQLAlchemyError, StripeError, HTTPException, ValueError) as e:
+            # ValueError: StripeService() refuses to build without STRIPE_SECRET_KEY
             logger.error(f"Failed to sync subscription from Stripe: {str(e)}")
             return None
 

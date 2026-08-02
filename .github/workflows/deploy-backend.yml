@@ -65,8 +65,9 @@ jobs:
             # Build and start using compose prod file
             docker compose -f docker-compose.prod.yml up -d --build
 
-            # Run DB migrations inside the backend service
-            docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head || true
+            # Run DB migrations inside the api service (service is named 'api'
+            # in docker-compose.prod.yml; failures must fail the deploy)
+            docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
 
             # Health check
             curl -sSf http://localhost:8000/health | cat

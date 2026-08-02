@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# EC2 Deployment Script for Improv Today Backend
+# EC2 Deployment Script for Clara Backend
 
-echo "🚀 Deploying Improv Today Backend to EC2..."
+echo "🚀 Deploying Clara Backend to EC2..."
 
 # Update system
 sudo apt update && sudo apt upgrade -y

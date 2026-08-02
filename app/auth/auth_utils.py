@@ -45,7 +45,7 @@ class AuthUtils:
                 response.raise_for_status()
                 self.jwks_cache = response.json()
                 return self.jwks_cache
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"Failed to get JWKS: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -67,7 +67,7 @@ class AuthUtils:
             if key.get("kid") == kid:
                 try:
                     return jwt.algorithms.RSAAlgorithm.from_jwk(key)
-                except Exception as e:
+                except (jwt.PyJWTError, ValueError, KeyError) as e:
                     logger.error(f"Failed to construct RSA key: {str(e)}")
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,7 +125,7 @@ class AuthUtils:
                         logger.info(f"Retrieved user info from Auth0 userinfo endpoint for user: {user_info['email']}")
                     else:
                         logger.warning(f"Failed to fetch userinfo: {response.status_code}")
-            except Exception as e:
+            except (httpx.HTTPError, ValueError) as e:
                 logger.error(f"Error fetching userinfo: {str(e)}")
         
         if not user_info["email"]:
@@ -201,7 +201,9 @@ class AuthUtils:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid JWE token header"
             )
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
+            # HTTPExceptions raised above keep their own detail instead of being
+            # flattened into a generic message.
             logger.error(f"JWE token handling failed: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -282,8 +284,10 @@ class AuthUtils:
             )
         except HTTPException:
             raise
-        except Exception as e:
-            logger.error(f"Token verification failed: {str(e)}")
+        except Exception:
+            # Safety net kept on purpose: an unexpected error at the auth boundary
+            # must fail closed as a 401, never a 500 with internals attached.
+            logger.exception("Token verification failed")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication failed"

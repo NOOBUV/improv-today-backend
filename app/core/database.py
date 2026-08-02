@@ -154,12 +154,6 @@ def ensure_dev_sqlite_columns():
             # users.anon_uuid
             if not _sqlite_table_has_column(connection, 'users', 'anon_uuid'):
                 connection.execute(text("ALTER TABLE users ADD COLUMN anon_uuid VARCHAR"))
-            # sessions.personality
-            if not _sqlite_table_has_column(connection, 'sessions', 'personality'):
-                connection.execute(text("ALTER TABLE sessions ADD COLUMN personality VARCHAR"))
-            # sessions.last_message_at
-            if not _sqlite_table_has_column(connection, 'sessions', 'last_message_at'):
-                connection.execute(text("ALTER TABLE sessions ADD COLUMN last_message_at TIMESTAMP"))
-            logger.info("Ensured dev SQLite columns exist (anon_uuid, personality, last_message_at)")
+            logger.info("Ensured dev SQLite columns exist (anon_uuid)")
     except Exception as e:
         logger.warning(f"Could not ensure dev SQLite columns: {e}")

@@ -69,9 +69,9 @@ class GlobalEventUpdate(BaseModel):
     """Schema for updating an existing global event."""
     status: Optional[EventStatus] = None
     processed_at: Optional[datetime] = None
-    emotional_reaction: Optional[str] = Field(None, description="Ava's emotional reaction")
-    chosen_action: Optional[str] = Field(None, description="Ava's chosen action")
-    internal_thoughts: Optional[str] = Field(None, description="Ava's internal thoughts")
+    emotional_reaction: Optional[str] = Field(None, description="Clara's emotional reaction")
+    chosen_action: Optional[str] = Field(None, description="Clara's chosen action")
+    internal_thoughts: Optional[str] = Field(None, description="Clara's internal thoughts")
     consciousness_raw_response: Optional[str] = Field(None, description="Raw LLM response")
 
 

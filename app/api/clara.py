@@ -19,10 +19,7 @@ from app.schemas.clara import (
     ClaraStateCreate,
     ClaraStateUpdate
 )
-from app.services.character_content_service import CharacterContentService
-from app.services.conversation_prompt_service import ConversationPromptService, EmotionType as ServiceEmotionType
-from app.services.clara_llm_service import ClaraLLMService
-from app.services.enhanced_conversation_service import EnhancedConversationService
+from app.services.clara_conversation_service import ClaraConversationService
 from app.services.event_selection_service import EventSelectionService
 
 router = APIRouter()
@@ -48,7 +45,7 @@ async def conversation(
         logger.info(f"Processing conversation request for user {current_user.id}: {request.message[:100]}...")
 
         # Initialize services
-        enhanced_service = EnhancedConversationService()
+        enhanced_service = ClaraConversationService()
         event_service = EventSelectionService()
 
         # Handle conversation tracking with session_id
@@ -78,7 +75,7 @@ async def conversation(
             user_id=str(current_user.id),
             conversation_id=conversation_id,
             conversation_history=None,  # Enhanced service handles its own conversation history via SessionStateService
-            personality=request.personality or "friendly_neutral",
+            personality=request.personality or "friendly",
             fresh_events=fresh_events  # Pass fresh events to avoid repetition
         )
 
@@ -214,7 +211,7 @@ async def stream_conversation(
         logger.info(f"Processing streaming conversation request for user {current_user.id}: {request.message[:100]}...")
 
         # Initialize services (same as normal /conversation endpoint)
-        enhanced_service = EnhancedConversationService()
+        enhanced_service = ClaraConversationService()
         event_service = EventSelectionService()
 
         # Handle conversation tracking with session_id (same as normal endpoint)
@@ -242,7 +239,7 @@ async def stream_conversation(
             user_id=str(current_user.id),
             conversation_id=conversation_id,
             conversation_history=None,  # Enhanced service handles via SessionStateService
-            personality=request.personality or "friendly_neutral",
+            personality=request.personality or "friendly",
             fresh_events=fresh_events,
             stream=True  # Enable SSE streaming
         )

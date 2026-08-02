@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 class DatabaseTask(Task):
     """Base task class that provides database session handling"""
 
-    async def get_session(self) -> AsyncSession:
-        """Get async database session"""
-        return AsyncSessionLocal()
-
 
 async def _generate_daily_journal_entry_async(task_id: str, target_date_str: Optional[str] = None) -> Dict[str, Any]:
     """Async implementation of daily journal generation"""

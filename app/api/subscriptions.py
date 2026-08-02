@@ -71,7 +71,7 @@ def create_test_subscription_plans(db: Session = Depends(get_db)):
         basic_plan = subscription_service.create_subscription_plan(
             db=db,
             name="Basic Plan",
-            description="Access to Ava conversations with 14-day trial",
+            description="Access to Clara conversations with 14-day trial",
             price_cents=999,  # $9.99
             interval="month",
             stripe_price_id="price_test_basic_999",  # Placeholder for now
@@ -521,7 +521,7 @@ async def create_payment_intent(
 
 
 @router.get("/status", response_model=SubscriptionStatus)
-async def get_subscription_status(
+async def get_subscription_status_current(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -529,8 +529,10 @@ async def get_subscription_status(
     Get the current subscription status for the authenticated user.
     """
     try:
-        return await subscription_service.check_user_subscription_status(db, current_user.id)
-        
+        # check_user_subscription_status is sync — a stray await here made this
+        # endpoint 500 on every request (TypeError swallowed by the except)
+        return subscription_service.check_user_subscription_status(db, current_user.id)
+
     except Exception as e:
         logger.error(f"Failed to get subscription status for user {current_user.id}: {str(e)}")
         raise HTTPException(
@@ -622,8 +624,10 @@ async def handle_stripe_webhook(request: Request, db: Session = Depends(get_db))
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Webhook processing failed: {str(e)}")
+    except Exception:
+        # Safety net kept on purpose: the handler must answer Stripe with a clean
+        # 500 (so it retries) rather than leak a traceback from any _handle_* path.
+        logger.exception("Webhook processing failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Webhook processing failed"

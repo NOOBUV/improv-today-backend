@@ -148,7 +148,7 @@ class TestStripeWebhookHandling:
             await stripe_service.verify_webhook_signature(mock_request)
 
         assert exc_info.value.status_code == 400
-        assert "Webhook processing failed" in str(exc_info.value.detail)
+        assert "Missing Stripe signature" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
     async def test_webhook_without_secret_configured(self):
@@ -339,4 +339,4 @@ class TestStripeWebhookHandling:
             await stripe_service.verify_webhook_signature(mock_request)
 
         assert exc_info.value.status_code == 400
-        assert "Webhook processing failed" in str(exc_info.value.detail)
+        assert "Missing Stripe signature" in str(exc_info.value.detail)

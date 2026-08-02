@@ -10,10 +10,9 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta, timezone
 import logging
 
-from app.models.simulation import GlobalEvents, ClaraGlobalState, SimulationLog, SimulationConfig
+from app.models.simulation import GlobalEvents, ClaraGlobalState, SimulationConfig
 from app.schemas.simulation_schemas import (
     GlobalEventCreate, GlobalEventUpdate, ClaraGlobalStateCreate, ClaraGlobalStateUpdate,
-    SimulationLogCreate, SimulationConfigCreate, SimulationConfigUpdate,
     EventType, EventStatus
 )
 
@@ -109,16 +108,16 @@ class SimulationRepository:
             logger.error(f"Error updating global event {event_id}: {e}")
             raise
 
-    # Ava Global State operations
+    # Clara Global State operations
     async def get_clara_global_state(self, trait_name: str) -> Optional[ClaraGlobalState]:
-        """Get Ava's global state for a specific trait."""
+        """Get Clara's global state for a specific trait."""
         try:
             result = await self.db.execute(
                 select(ClaraGlobalState).where(ClaraGlobalState.trait_name == trait_name)
             )
             return result.scalar_one_or_none()
         except Exception as e:
-            logger.error(f"Error getting Ava global state for {trait_name}: {e}")
+            logger.error(f"Error getting Clara global state for {trait_name}: {e}")
             raise
 
     async def get_all_clara_global_states(self) -> List[ClaraGlobalState]:
@@ -137,7 +136,7 @@ class SimulationRepository:
         trait_name: str,
         state_data: ClaraGlobalStateCreate | ClaraGlobalStateUpdate
     ) -> ClaraGlobalState:
-        """Create or update Ava's global state for a trait."""
+        """Create or update Clara's global state for a trait."""
         try:
             existing_state = await self.get_clara_global_state(trait_name)
 
@@ -171,44 +170,7 @@ class SimulationRepository:
 
         except Exception as e:
             await self.db.rollback()
-            logger.error(f"Error creating/updating Ava state for {trait_name}: {e}")
-            raise
-
-    # Simulation Log operations
-    async def create_simulation_log(self, log_data: SimulationLogCreate) -> SimulationLog:
-        """Create a new simulation log entry."""
-        try:
-            db_log = SimulationLog(**log_data.model_dump())
-            self.db.add(db_log)
-            await self.db.commit()
-            await self.db.refresh(db_log)
-            return db_log
-        except Exception as e:
-            await self.db.rollback()
-            logger.error(f"Error creating simulation log: {e}")
-            raise
-
-    async def get_recent_logs(
-        self,
-        component: Optional[str] = None,
-        level: Optional[str] = None,
-        limit: int = 100
-    ) -> List[SimulationLog]:
-        """Get recent simulation logs with optional filtering."""
-        try:
-            query = select(SimulationLog)
-
-            if component:
-                query = query.where(SimulationLog.component == component)
-            if level:
-                query = query.where(SimulationLog.level == level)
-
-            query = query.order_by(SimulationLog.timestamp.desc()).limit(limit)
-
-            result = await self.db.execute(query)
-            return list(result.scalars().all())
-        except Exception as e:
-            logger.error(f"Error getting recent logs: {e}")
+            logger.error(f"Error creating/updating Clara state for {trait_name}: {e}")
             raise
 
     # Simulation Config operations
@@ -225,65 +187,6 @@ class SimulationRepository:
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting config {key}: {e}")
-            raise
-
-    async def get_all_configs(self, category: Optional[str] = None) -> List[SimulationConfig]:
-        """Get all active configuration settings, optionally filtered by category."""
-        try:
-            query = select(SimulationConfig).where(SimulationConfig.is_active == True)
-
-            if category:
-                query = query.where(SimulationConfig.category == category)
-
-            query = query.order_by(SimulationConfig.category, SimulationConfig.key)
-
-            result = await self.db.execute(query)
-            return list(result.scalars().all())
-        except Exception as e:
-            logger.error(f"Error getting all configs: {e}")
-            raise
-
-    async def create_or_update_config(
-        self,
-        key: str,
-        config_data: SimulationConfigCreate | SimulationConfigUpdate
-    ) -> SimulationConfig:
-        """Create or update a configuration setting."""
-        try:
-            existing_config = await self.get_config(key)
-
-            if existing_config:
-                # Update existing config
-                update_data = config_data.model_dump(exclude_unset=True)
-                if update_data:
-                    await self.db.execute(
-                        update(SimulationConfig)
-                        .where(SimulationConfig.key == key)
-                        .values(**update_data)
-                    )
-                    await self.db.commit()
-                return await self.get_config(key)
-            else:
-                # Create new config
-                if isinstance(config_data, SimulationConfigUpdate):
-                    # Convert update to create data
-                    create_data = SimulationConfigCreate(
-                        key=key,
-                        value=config_data.value or "",
-                        **config_data.model_dump(exclude_unset=True, exclude={'value'})
-                    )
-                else:
-                    create_data = config_data
-
-                db_config = SimulationConfig(**create_data.model_dump())
-                self.db.add(db_config)
-                await self.db.commit()
-                await self.db.refresh(db_config)
-                return db_config
-
-        except Exception as e:
-            await self.db.rollback()
-            logger.error(f"Error creating/updating config {key}: {e}")
             raise
 
     # Statistics and aggregation methods
