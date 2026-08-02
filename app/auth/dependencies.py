@@ -5,22 +5,42 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.auth.auth_utils import AuthUtils, security
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
 
 # Create auth utils instance
 auth_utils = AuthUtils()
 
-async def verify_protected_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
+# Identity handed to unauthenticated requests when ENVIRONMENT == "development",
+# so localhost runs without an Auth0 tenant. get_current_user creates/loads a real
+# row for it, so conversation and subscription lookups behave like a normal user.
+DEV_AUTH0_SUB = "dev|local"
+DEV_EMAIL = "dev@localhost"
+
+async def verify_protected_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict:
     """
     Dependency that verifies the Auth0 JWT token.
-    
+
     Args:
         credentials: The HTTP Authorization credentials containing the token
-        
+
     Returns:
         Dict: The decoded token payload containing user information
     """
+    if credentials is None:
+        # ponytail: dev bypass lives here, the single choke point every
+        # get_current_user / require_active_subscription route passes through.
+        # settings.is_development is `environment == "development"` exactly.
+        if settings.is_development:
+            return {"sub": DEV_AUTH0_SUB, "email": DEV_EMAIL, "name": "Local Dev"}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return await auth_utils.verify_token(credentials)
 
 async def get_current_user(

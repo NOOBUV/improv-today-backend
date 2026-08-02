@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.auth.dependencies import DEV_AUTH0_SUB, get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.subscription_management_service import SubscriptionManagementService
 
@@ -45,6 +45,12 @@ class SubscriptionGuard:
         """
         if not user:
             return False
+
+        # ponytail: short-circuit for the local dev user instead of provisioning it
+        # a trial row — same effect, no subscription state to keep alive. Scoped to
+        # that one identity so real users still hit the real check in development.
+        if settings.is_development and user.auth0_sub == DEV_AUTH0_SUB:
+            return True
 
         # Check if user is a superadmin - they always have access
         if user.email and user.email in settings.superadmin_emails_list:

@@ -71,6 +71,15 @@ settings = Settings()
 # deploy, not a degraded one (the default JWT secret forges tokens; Clara without
 # an API key answers with canned fallback lines).
 if settings.is_production:
+    # Tripwire for the unauthenticated dev bypass in app/auth/dependencies.py: it
+    # gates on `is_development`, so if that property is ever loosened (e.g. to
+    # "not production") a production boot dies here instead of quietly serving
+    # every request as dev@localhost.
+    if settings.is_development:
+        raise RuntimeError(
+            "Dev auth bypass would be active in production: is_development must "
+            'mean environment == "development" and nothing else'
+        )
     if settings.jwt_secret == "your-secret-key-change-in-production":
         raise RuntimeError("JWT_SECRET must be set in production")
     if not settings.openai_api_key:

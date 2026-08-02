@@ -9,8 +9,11 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize security scheme for Bearer token
-security = HTTPBearer()
+# Initialize security scheme for Bearer token.
+# auto_error=False: a missing header must reach verify_protected_token (which
+# raises 401 outside development) and get_current_user_optional (which returns
+# None) instead of being turned into a 403 by HTTPBearer itself.
+security = HTTPBearer(auto_error=False)
 
 class AuthUtils:
     """
