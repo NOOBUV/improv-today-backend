@@ -1,4 +1,5 @@
 kokoro-onnx
+mlx-audio
 soundfile
 fastapi
 uvicorn[standard]

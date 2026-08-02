@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time setup for the local Kokoro voice server. Safe to re-run.
+# One-time setup for the local voice server. Safe to re-run. Only fetches the Kokoro
+# fallback weights — Qwen3's land in the HF cache on the server's first start.
 set -euo pipefail
 cd "$(dirname "$0")"
 

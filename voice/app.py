@@ -1,19 +1,77 @@
-"""Local Kokoro TTS server for Clara. Host-side only — deliberately not part of the API image."""
+"""Local TTS server for Clara. Host-side only — deliberately not part of the API image.
+
+Qwen3-TTS (emotion-conditioned, MLX) is the voice; Kokoro stays loaded as the fallback
+for when Qwen3 fails or runs long.
+"""
 
 import io
+import logging
+import threading
+import time
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from kokoro_onnx import Kokoro
+from mlx_audio.tts.utils import load_model
 from pydantic import BaseModel
 
-DEFAULT_VOICE = "af_heart"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("clara.voice")
+
 MODELS = Path(__file__).parent / "models"
+KOKORO_VOICE = "af_heart"
+QWEN_REPO = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-bf16"
+QWEN_SPEAKER = "vivian"  # undocumented, but the only stable young-female identity on English
+
+# One instruct string per Clara emotion (app/schemas/clara.py::EmotionType). Wording matters
+# for more than tone: "playful, teasing, confident" made every sassy line ramble past the
+# timeout, the phrasing below lands the same character in ~6.5s.
+INSTRUCT = {
+    "calm": "calm and warm",
+    "happy": "very happy and excited",
+    "sad": "quiet, subdued, a little down",
+    "stressed": "tense and hurried",
+    "sassy": "sassy and sarcastic, playful",
+}
+DEFAULT_EMOTION = "calm"
+
+# Low-energy lines occasionally ramble. 12Hz codec => ~12 audio tokens per second, so this
+# caps a single sentence at ~20s — several times the longest thing Clara actually writes.
+MAX_TOKENS = 12 * 20
+# Measured worst case for a real reply is ~9.4s (a 20-word sentence read sad, which is
+# genuinely slow speech rather than a ramble). Anything past this is better served fast and
+# flat by Kokoro than beautifully a quarter-minute late.
+SYNTH_TIMEOUT_S = 10.0
 
 kokoro = Kokoro(str(MODELS / "kokoro-v1.0.onnx"), str(MODELS / "voices-v1.0.bin"))
+
+
+def _load_qwen():
+    """Load + run one generation, so the first real request isn't paying for warm-up."""
+    model = load_model(QWEN_REPO)
+    for _ in model.generate(
+        text="Warming up.", voice=QWEN_SPEAKER, instruct=INSTRUCT[DEFAULT_EMOTION], stream=True
+    ):
+        pass
+    return model
+
+
+t0 = time.monotonic()
+try:
+    qwen = _load_qwen()
+    qwen_error = None
+    log.info("Qwen3 (%s/%s) warm in %.1fs", QWEN_REPO, QWEN_SPEAKER, time.monotonic() - t0)
+except Exception as exc:  # missing weights, no metal, OOM — Kokoro still serves
+    qwen, qwen_error = None, f"{type(exc).__name__}: {exc}"
+    log.warning("Qwen3 unavailable, serving Kokoro only: %s", qwen_error)
+
+# ponytail: one model, one caller. The frontend speaks a sentence at a time and awaits each,
+# so this lock is never contended — it's here so a stray second request can't reenter MLX.
+synth_lock = threading.Lock()
 
 app = FastAPI(title="Clara Voice")
 app.add_middleware(
@@ -26,20 +84,67 @@ app.add_middleware(
 
 class SpeechRequest(BaseModel):
     input: str
-    voice: str = DEFAULT_VOICE
+    voice: str = KOKORO_VOICE  # Kokoro speaker; ignored by Qwen3, which is pinned to vivian
     speed: float = 1.0
+    emotion: str = DEFAULT_EMOTION
+
+
+def _wav(samples, sample_rate: int) -> bytes:
+    buf = io.BytesIO()
+    sf.write(buf, samples, sample_rate, format="WAV")
+    return buf.getvalue()
+
+
+def _qwen_speak(text: str, emotion: str) -> bytes:
+    """Raises on anything, including overrunning SYNTH_TIMEOUT_S, so the caller can fall back.
+
+    ponytail: the deadline is checked per streamed chunk, not enforced by a killable thread —
+    MAX_TOKENS is what bounds the loop, this just stops us waiting out a slow one.
+    """
+    deadline = time.monotonic() + SYNTH_TIMEOUT_S
+    chunks, sample_rate = [], 24000
+    for result in qwen.generate(
+        text=text,
+        voice=QWEN_SPEAKER,
+        instruct=INSTRUCT.get(emotion, INSTRUCT[DEFAULT_EMOTION]),
+        max_tokens=MAX_TOKENS,
+        stream=True,
+    ):
+        sample_rate = result.sample_rate
+        chunks.append(np.asarray(result.audio, dtype=np.float32).reshape(-1))
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"exceeded {SYNTH_TIMEOUT_S}s")
+    return _wav(np.concatenate(chunks), sample_rate)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "voice": DEFAULT_VOICE}
+    return {
+        "status": "ok",
+        "engine": "qwen3" if qwen else "kokoro",
+        "qwen3": "ready" if qwen else f"unavailable ({qwen_error})",
+        "qwen3_speaker": QWEN_SPEAKER,
+        "kokoro": "ready",
+        "voice": KOKORO_VOICE,
+    }
 
 
 @app.post("/v1/audio/speech")
 def speech(req: SpeechRequest) -> Response:
-    # ponytail: synchronous — one browser, one sentence at a time. Add a thread pool if
-    # concurrent callers ever show up.
-    samples, sample_rate = kokoro.create(req.input, voice=req.voice, speed=req.speed, lang="en-us")
-    buf = io.BytesIO()
-    sf.write(buf, samples, sample_rate, format="WAV")
-    return Response(buf.getvalue(), media_type="audio/wav")
+    with synth_lock:
+        if qwen is not None:
+            started = time.monotonic()
+            try:
+                wav = _qwen_speak(req.input, req.emotion)
+                log.info("qwen3/%s %.2fs %r", req.emotion, time.monotonic() - started, req.input[:60])
+                return Response(wav, media_type="audio/wav")
+            except Exception as exc:
+                log.warning(
+                    "Qwen3 failed after %.2fs (%s: %s) — falling back to Kokoro",
+                    time.monotonic() - started, type(exc).__name__, exc,
+                )
+
+        samples, sample_rate = kokoro.create(
+            req.input, voice=req.voice, speed=req.speed, lang="en-us"
+        )
+        return Response(_wav(samples, sample_rate), media_type="audio/wav")
