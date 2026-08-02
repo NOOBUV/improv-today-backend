@@ -356,3 +356,22 @@ class TestSubscriptionSecurityGuards:
                 require_active_subscription(current_user=inactive_user, db=mock_db)
 
             assert exc_info.value.status_code == status.HTTP_402_PAYMENT_REQUIRED
+
+@pytest.mark.asyncio
+async def test_get_subscription_status_does_not_await_sync_service(mock_db, sample_user):
+    """GET /subscriptions/status must not await the sync service method.
+
+    A stray `await` broke this endpoint 100% of the time: the TypeError was
+    swallowed by the endpoint's `except Exception` and returned as a 500.
+    """
+    from app.api.subscriptions import get_subscription_status_current
+
+    expected = SubscriptionStatus(is_active=True, is_trial=False, status="active")
+
+    with patch('app.api.subscriptions.subscription_service') as mock_service:
+        mock_service.check_user_subscription_status = Mock(return_value=expected)
+
+        result = await get_subscription_status_current(current_user=sample_user, db=mock_db)
+
+    assert result is expected
+    mock_service.check_user_subscription_status.assert_called_once_with(mock_db, sample_user.id)
