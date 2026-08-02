@@ -48,7 +48,7 @@ class TestConversationPromptService:
     def test_get_conversation_emotion_context_all_emotions(self, prompt_service):
         """Test conversation emotion context for all emotion types"""
         for emotion in EmotionType:
-            result = prompt_service._get_conversation_emotion_context(emotion, "test message")
+            result = prompt_service._get_conversation_emotion_context(emotion)
             
             assert emotion.value in result
             assert "you are feeling" in result

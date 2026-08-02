@@ -6,7 +6,7 @@ import pytest
 import asyncio
 import time
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from app.services.conversation_performance import ConversationPerformanceMonitor, _Step, maybe_step
+from app.services.conversation_performance import ConversationPerformanceMonitor
 from app.services.clara_conversation_service import ClaraConversationService
 
 
@@ -61,7 +61,7 @@ class TestConversationPerformanceMonitor:
 
         with performance_monitor.step(main_context, "sub_op_1") as s:
             time.sleep(0.01)
-            s.meta(custom_metric="test_value", items_processed=5)
+            s.update(custom_metric="test_value", items_processed=5)
 
         assert "sub_op_1" in main_context["sub_operations"]
         recorded = main_context["sub_operations"]["sub_op_1"]
@@ -91,29 +91,12 @@ class TestConversationPerformanceMonitor:
 
         with pytest.raises(ValueError, match="kaput"):
             with performance_monitor.step(context, "boom") as s:
-                s.meta(partial=True)
+                s.update(partial=True)
                 raise ValueError("kaput")
 
         recorded = context["sub_operations"]["boom"]
         assert recorded["error"] == "kaput"
         assert recorded["partial"] is True
-
-    def test_maybe_step_without_context(self, performance_monitor):
-        """maybe_step is a no-op recorder when there is no timing context."""
-        with maybe_step(performance_monitor, None, "anything") as s:
-            s.meta(x=1)
-
-        assert isinstance(s, _Step)
-        assert s.metadata == {"x": 1}
-
-    def test_maybe_step_with_context(self, performance_monitor):
-        """maybe_step delegates to step() when a timing context exists."""
-        context = performance_monitor.start_timing_context("maybe_test", "main_op")
-
-        with maybe_step(performance_monitor, context, "sub") as s:
-            s.meta(y=2)
-
-        assert context["sub_operations"]["sub"]["y"] == 2
 
     def test_total_response_time_threshold(self, performance_monitor):
         """Test total response time threshold monitoring."""
@@ -396,37 +379,6 @@ class TestClaraConversationServicePerformance:
             assert threshold_key in monitor.alert_thresholds
             assert monitor.alert_thresholds[threshold_key] == expected_value
 
-    def test_detailed_timing_breakdown_logging(self, conversation_service):
-        """Test detailed timing breakdown logging functionality."""
-        monitor = conversation_service.performance_monitor
-
-        # Mock logger to capture detailed breakdown
-        with patch.object(monitor.performance_logger, 'info') as mock_info:
-            # Create mock metrics data with sub-operations
-            mock_metrics = {
-                "correlation_id": "test_corr_123",
-                "operation": "enhanced_conversation_response",
-                "total_duration_ms": 2500.0,
-                "sub_operations": {
-                    "openai_api_call": {"duration_ms": 1800.0, "model": "gpt-4o-mini"},
-                    "prompt_construction": {"duration_ms": 250.0, "prompt_length": 1500},
-                    "context_extraction": {"duration_ms": 150.0, "backstory_chars": 500},
-                    "emotion_selection": {"duration_ms": 120.0, "selected_emotion": "happy"},
-                    "response_parsing": {"duration_ms": 80.0, "json_parsed": True}
-                }
-            }
-
-            monitor.log_detailed_timing_breakdown(mock_metrics)
-
-            # Verify detailed breakdown was logged
-            mock_info.assert_called_once()
-            log_call = mock_info.call_args[0][0]
-
-            # Check that breakdown includes all components
-            assert "DETAILED TIMING BREAKDOWN" in log_call
-            assert "openai_api_call: 1800.00ms" in log_call
-            assert "prompt_construction: 250.00ms" in log_call
-            assert "⚠️ SLOW" in log_call  # Should show warning for slow OpenAI call
 
     def test_granular_threshold_alerting(self, conversation_service):
         """Test that granular thresholds trigger appropriate alerts."""

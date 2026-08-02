@@ -10,7 +10,7 @@ import time
 
 from app.core.conversation_config import conversation_config
 from app.services.character_content_service import CharacterContentService
-from app.services.conversation_performance import ConversationPerformanceMonitor, maybe_step
+from app.services.conversation_performance import ConversationPerformanceMonitor
 from app.services.conversation_prompt_service import ConversationPromptService
 from app.services.state_influence_service import StateInfluenceService, ConversationScenario
 from app.services.simulation.state_manager import StateManagerService
@@ -20,6 +20,8 @@ from app.core.config import settings
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+OPENAI_MODEL = "gpt-4o-mini"
 
 # Voice options for the fallback path only (the enhanced path builds its own prompt).
 FALLBACK_PERSONALITY_PROMPTS = {
@@ -110,14 +112,13 @@ class ClaraConversationService:
                         max_messages=4  # Reduced from 10 to 4 (2 exchanges) for faster TTFT
                     )
 
-                s.meta(
+                s.update(
                     user_message_length=len(user_message),
                     history_retrieved=bool(conversation_history),
                     fresh_events_provided=len(fresh_events) if fresh_events else 0
                 )
 
             # Sub-operation 2: Context gathering with detailed breakdown
-            context_start = time.time()
             logger.debug(f"[{correlation_id}] Starting context gathering...")
             simulation_context = {}
 
@@ -127,10 +128,7 @@ class ClaraConversationService:
                         user_message, user_id, conversation_id, user_preferences, fresh_events, timing_context
                     )
 
-                    context_time = (time.time() - context_start) * 1000
-                    logger.debug(f"[{correlation_id}] Context gathering completed: {context_time:.0f}ms")
-
-                    s.meta(
+                    s.update(
                         context_items_gathered=len(simulation_context),
                         recent_events_count=len(simulation_context.get("recent_events", [])),
                         backstory_chars=simulation_context.get("selected_backstory", {}).get("char_count", 0)
@@ -152,8 +150,7 @@ class ClaraConversationService:
                             user_id=user_id,
                             conversation_id=conversation_id,
                             simulation_context=simulation_context,
-                            conversation_history=conversation_history,
-                            timing_context=timing_context,
+                                                        timing_context=timing_context,
                             correlation_id=correlation_id
                         )
 
@@ -162,11 +159,10 @@ class ClaraConversationService:
                         response = await self._respond(
                             user_message=user_message,
                             simulation_context=simulation_context,
-                            conversation_history=conversation_history,
-                            timing_context=timing_context
+                                                        timing_context=timing_context
                         )
 
-                        s.meta(
+                        s.update(
                             response_length=len(response.get("ai_response", "")),
                             enhanced_mode=True,
                             emotion_selected=response.get("simulation_context", {}).get("conversation_emotion")
@@ -176,9 +172,6 @@ class ClaraConversationService:
                     with self.performance_monitor.step(timing_context, "response_formatting") as s:
                         # Add comprehensive performance metrics
                         final_metrics = self.performance_monitor.end_timing_context(timing_context)
-
-                        # Log detailed timing breakdown for analysis
-                        self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
 
                         response["performance_metrics"] = final_metrics
                         response["enhanced_mode"] = True
@@ -195,7 +188,7 @@ class ClaraConversationService:
                             global_mood=response.get("simulation_context", {}).get("global_mood")
                         )
 
-                        s.meta(
+                        s.update(
                             session_state_updated=True,
                             events_tracked=len(simulation_context.get("content_selection_metadata", {}).get("fresh_events_used", []))
                         )
@@ -226,7 +219,7 @@ class ClaraConversationService:
                     user_message, conversation_history, personality
                 )
 
-                s.meta(
+                s.update(
                     response_length=len(fallback_text),
                     fallback_mode=True
                 )
@@ -234,9 +227,6 @@ class ClaraConversationService:
             # Sub-operation 6: Fallback response formatting
             with self.performance_monitor.step(timing_context, "response_formatting") as s:
                 final_metrics = self.performance_monitor.end_timing_context(timing_context)
-
-                # Log detailed timing breakdown for fallback analysis
-                self.performance_monitor.log_detailed_timing_breakdown(final_metrics)
 
                 result = {
                     "ai_response": fallback_text,
@@ -260,7 +250,7 @@ class ClaraConversationService:
                     fallback=True
                 )
 
-                s.meta(
+                s.update(
                     session_state_updated=True,
                     fallback_mode=True
                 )
@@ -289,15 +279,15 @@ class ClaraConversationService:
 
         try:
             # Sub-sub-operation: Global state retrieval
-            with maybe_step(self.performance_monitor, timing_context, "global_state_retrieval") as s:
+            with self.performance_monitor.step(timing_context, "global_state_retrieval") as s:
                 global_state = await self.state_manager_service.get_current_global_state()
                 context["global_state"] = global_state
-                s.meta(traits_count=len(global_state))
+                s.update(traits_count=len(global_state))
 
             logger.debug(f"Retrieved global state: {len(global_state)} traits")
 
             # Sub-sub-operation: Event selection and processing
-            with maybe_step(self.performance_monitor, timing_context, "event_selection") as s:
+            with self.performance_monitor.step(timing_context, "event_selection") as s:
                 if fresh_events is not None:
                     logger.info(f"Using pre-selected fresh events: {len(fresh_events)} events")
                     fresh_events_data = fresh_events
@@ -319,7 +309,7 @@ class ClaraConversationService:
                     "fresh_events_used": [event.get("id") for event in fresh_events_data]
                 }
 
-                s.meta(
+                s.update(
                     events_selected=len(fresh_events_data),
                     pre_selected=fresh_events is not None
                 )
@@ -327,13 +317,13 @@ class ClaraConversationService:
             logger.info(f"Fresh events selection: {len(fresh_events_data)} events selected")
 
             # Sub-sub-operation: Backstory content selection
-            with maybe_step(self.performance_monitor, timing_context, "backstory_selection") as s:
+            with self.performance_monitor.step(timing_context, "backstory_selection") as s:
                 backstory_context_data = await self.character_content_service.select_relevant_content(
                     user_message=user_message,
                     max_chars=int(self.config.MAX_BACKSTORY_CHARS * 0.6)
                 )
                 context["selected_backstory"] = backstory_context_data
-                s.meta(
+                s.update(
                     chars_selected=backstory_context_data['char_count'],
                     content_types=len(backstory_context_data['content_types'])
                 )
@@ -341,12 +331,12 @@ class ClaraConversationService:
             logger.debug(f"Selected backstory: {backstory_context_data['char_count']} chars, types: {backstory_context_data['content_types']}")
 
             # Sub-sub-operation: Conversation sentiment analysis
-            with maybe_step(self.performance_monitor, timing_context, "sentiment_analysis") as s:
+            with self.performance_monitor.step(timing_context, "sentiment_analysis") as s:
                 conversation_sentiment_score = self._message_sentiment_score(user_message)
-                s.meta(sentiment_score=conversation_sentiment_score)
+                s.update(sentiment_score=conversation_sentiment_score)
 
             # Sub-sub-operation: State influence calculation
-            with maybe_step(self.performance_monitor, timing_context, "state_influence_calculation") as s:
+            with self.performance_monitor.step(timing_context, "state_influence_calculation") as s:
                 conversation_context = await self.state_influence_service.build_conversation_context(
                     user_id=user_id,
                     conversation_id=conversation_id,
@@ -356,7 +346,7 @@ class ClaraConversationService:
                     recent_events=context["recent_events"]
                 )
                 context["conversation_influence"] = conversation_context
-                s.meta(influence_factors=len(conversation_context))
+                s.update(influence_factors=len(conversation_context))
 
             logger.debug(f"Built conversation context with {len(conversation_context)} influence factors")
 
@@ -377,7 +367,7 @@ class ClaraConversationService:
 
         The single copy shared by the streaming and non-streaming paths.
         """
-        with maybe_step(self.performance_monitor, timing_context, "context_extraction") as s:
+        with self.performance_monitor.step(timing_context, "context_extraction") as s:
             global_state = simulation_context.get("global_state", {})
             recent_events = simulation_context.get("recent_events", [])
             selected_backstory = simulation_context.get("selected_backstory", {})
@@ -388,7 +378,7 @@ class ClaraConversationService:
             blended_mood = mood_transition_data.get("blended_mood_score", 60)
             mood_context = mood_transition_data.get("mood_context", {})
 
-            s.meta(
+            s.update(
                 global_state_items=len(global_state),
                 recent_events_count=len(recent_events),
                 backstory_chars=selected_backstory.get("char_count", 0),
@@ -397,19 +387,18 @@ class ClaraConversationService:
 
         logger.debug(f"Using intelligent content selection: {content_metadata.get('strategy', 'unknown')}")
 
-        with maybe_step(self.performance_monitor, timing_context, "emotion_selection") as s:
-            conversation_emotion, emotion_reasoning = self.conversation_prompt_service.select_conversation_emotion_with_mood(
+        with self.performance_monitor.step(timing_context, "emotion_selection") as s:
+            conversation_emotion, _ = self.conversation_prompt_service.select_conversation_emotion_with_mood(
                 user_message=user_message,
-                conversation_history=conversation_history,
                 blended_mood_score=blended_mood,
                 mood_transition_data=mood_transition_data
             )
-            s.meta(
+            s.update(
                 selected_emotion=conversation_emotion.value,
                 blended_mood_score=blended_mood
             )
 
-        with maybe_step(self.performance_monitor, timing_context, "prompt_construction") as s:
+        with self.performance_monitor.step(timing_context, "prompt_construction") as s:
             # One system message end to end: OpenAI caches the longest stable prefix
             system_prompt = self.conversation_prompt_service.construct_conversation_prompt_with_mood(
                 character_backstory=selected_backstory.get("content", ""),
@@ -421,7 +410,7 @@ class ClaraConversationService:
                 global_state=global_state,
                 content_metadata=content_metadata
             )
-            s.meta(
+            s.update(
                 prompt_length=len(system_prompt),
                 backstory_chars=len(selected_backstory.get("content", "")),
                 events_included=len(recent_events)
@@ -430,7 +419,6 @@ class ClaraConversationService:
         return {
             "system_prompt": system_prompt,
             "emotion": conversation_emotion,
-            "emotion_reasoning": emotion_reasoning,
             "blended_mood": blended_mood,
             "mood_context": mood_context
         }
@@ -504,9 +492,9 @@ class ClaraConversationService:
         )
         system_prompt = prepared["system_prompt"]
 
-        with maybe_step(self.performance_monitor, timing_context, "openai_api_call") as s:
+        with self.performance_monitor.step(timing_context, "openai_api_call") as s:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -517,16 +505,16 @@ class ClaraConversationService:
 
             ai_response_raw = response.choices[0].message.content
 
-            s.meta(
-                model="gpt-4o-mini",
+            s.update(
+                model=OPENAI_MODEL,
                 prompt_tokens=len(system_prompt.split()),
                 max_tokens=400,
                 response_length=len(ai_response_raw) if ai_response_raw else 0
             )
 
-        with maybe_step(self.performance_monitor, timing_context, "response_parsing") as s:
+        with self.performance_monitor.step(timing_context, "response_parsing") as s:
             ai_response, response_emotion = self._parse_llm_response(ai_response_raw, prepared["emotion"])
-            s.meta(
+            s.update(
                 json_parsed=ai_response != ai_response_raw,
                 final_response_length=len(ai_response)
             )
@@ -542,8 +530,7 @@ class ClaraConversationService:
                 "global_mood": mood_context.get("current_mood", 60),
                 "stress_level": mood_context.get("stress_level", 50),
                 "selected_content_types": selected_backstory.get("content_types", []),
-                "conversation_emotion": response_emotion,
-                "emotion_reasoning": prepared["emotion_reasoning"]
+                "conversation_emotion": response_emotion
             },
             "selected_backstory_types": selected_backstory.get("content_types", []),
             "fallback_mode": False
@@ -568,10 +555,8 @@ class ClaraConversationService:
         logger.debug(f"[{correlation_id}] STREAM START - Beginning context-aware response generation")
 
         try:
-            yield self._format_sse_event("processing_start", {
-                "correlation_id": correlation_id,
-                "status": "starting",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+            yield self._format_sse_event("processing_start", correlation_id, {
+                "status": "starting"
             })
 
             prepared = self._prepare_prompt(
@@ -580,16 +565,14 @@ class ClaraConversationService:
             conversation_emotion = prepared["emotion"]
             recent_events = simulation_context.get("recent_events", [])
 
-            yield self._format_sse_event("context_ready", {
-                "correlation_id": correlation_id,
+            yield self._format_sse_event("context_ready", correlation_id, {
                 "recent_events_count": len(recent_events),
-                "conversation_emotion": conversation_emotion.value if conversation_emotion else None,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "conversation_emotion": conversation_emotion.value if conversation_emotion else None
             })
 
             # AsyncOpenAI streams without blocking the event loop; chunks go out as they land
             stream = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": prepared["system_prompt"]},
                     {"role": "user", "content": user_message}
@@ -616,10 +599,8 @@ class ClaraConversationService:
                 chunk_count += 1
 
                 # Yield IMMEDIATELY - no buffering, no delays
-                yield self._format_sse_event("consciousness_chunk", {
-                    "correlation_id": correlation_id,
-                    "chunk": chunk_text,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                yield self._format_sse_event("consciousness_chunk", correlation_id, {
+                    "chunk": chunk_text
                 })
 
             logger.info(f"[{correlation_id}] Stream completed: {chunk_count} chunks, {len(accumulated_response)} chars")
@@ -638,13 +619,9 @@ class ClaraConversationService:
                 global_mood=prepared["blended_mood"]
             )
 
-            if timing_context:
-                final_metrics = self.performance_monitor.end_timing_context(timing_context)
-            else:
-                final_metrics = {"total_duration_ms": (time.time() - start_time) * 1000}
+            final_metrics = self.performance_monitor.end_timing_context(timing_context)
 
-            yield self._format_sse_event("processing_complete", {
-                "correlation_id": correlation_id,
+            yield self._format_sse_event("processing_complete", correlation_id, {
                 "response": full_ai_response,  # Already parsed message text only
                 "simulation_context": {
                     "conversation_emotion": response_emotion,
@@ -652,16 +629,13 @@ class ClaraConversationService:
                     "recent_events_count": len(recent_events)
                 },
                 "performance_metrics": final_metrics,
-                "success": True,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "success": True
             })
 
         except Exception as e:
             logger.error(f"Streaming response failed: {str(e)}")
-            yield self._format_sse_event("error", {
-                "correlation_id": correlation_id,
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+            yield self._format_sse_event("error", correlation_id, {
+                "error": str(e)
             })
 
     async def _fallback_response(
@@ -675,11 +649,6 @@ class ClaraConversationService:
         No simulation context, no JSON envelope - just a line in character.
         """
         if self.openai_client is None:
-            message_lower = user_message.lower()
-            if "name is" in message_lower or "i'm" in message_lower or "i am" in message_lower:
-                return "Nice to meet you! I'd love to know more about you. What do you enjoy doing in your free time?"
-            if "?" in user_message:
-                return "That's a great question! What do you think about it yourself?"
             return "That's really interesting! Can you tell me more about that?"
 
         base_prompt = FALLBACK_PERSONALITY_PROMPTS.get(
@@ -688,7 +657,7 @@ class ClaraConversationService:
         history_context = f"\n\nRecent conversation:\n{conversation_history}" if conversation_history else ""
 
         response = await self.openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": (
                     f"{base_prompt}\n\n"
@@ -721,18 +690,14 @@ class ClaraConversationService:
         start_time = time.time()
 
         try:
-            yield self._format_sse_event("processing_start", {
-                "correlation_id": correlation_id,
-                "status": "starting",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+            yield self._format_sse_event("processing_start", correlation_id, {
+                "status": "starting"
             })
 
             text = await self._fallback_response(user_message, conversation_history, personality)
 
-            yield self._format_sse_event("consciousness_chunk", {
-                "correlation_id": correlation_id,
-                "chunk": text,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+            yield self._format_sse_event("consciousness_chunk", correlation_id, {
+                "chunk": text
             })
 
             # Same persist point as _respond_stream: history must carry the reply,
@@ -747,8 +712,7 @@ class ClaraConversationService:
                 fallback=True
             )
 
-            yield self._format_sse_event("processing_complete", {
-                "correlation_id": correlation_id,
+            yield self._format_sse_event("processing_complete", correlation_id, {
                 "response": text,
                 "simulation_context": {
                     "conversation_emotion": None,
@@ -757,22 +721,23 @@ class ClaraConversationService:
                 },
                 "performance_metrics": {"total_duration_ms": (time.time() - start_time) * 1000},
                 "fallback_mode": True,
-                "success": True,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "success": True
             })
 
         except Exception as e:
             logger.error(f"[{correlation_id}] Fallback stream failed: {str(e)}")
-            yield self._format_sse_event("error", {
-                "correlation_id": correlation_id,
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+            yield self._format_sse_event("error", correlation_id, {
+                "error": str(e)
             })
 
-    def _format_sse_event(self, event_type: str, data: Dict[str, Any]) -> str:
-        """Format data as Server-Sent Events (SSE) string."""
-        json_data = json.dumps(data)
-        return f"event: {event_type}\ndata: {json_data}\n\n"
+    def _format_sse_event(self, event_type: str, correlation_id: str, data: Dict[str, Any]) -> str:
+        """Format data as an SSE string, stamping correlation_id + timestamp."""
+        payload = {
+            "correlation_id": correlation_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **data,
+        }
+        return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
 
     async def _track_events_mentioned(
         self,

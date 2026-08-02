@@ -15,53 +15,47 @@ logger = logging.getLogger(__name__)
 class CharacterContentService:
     """Loads character content and selects backstory relevant to the conversation."""
 
-    CONTENT_FILES = {  # {content_type: path relative to content/clara}
-        "character_gist": "clara-character-gist.md",
-        "connecting_memories": "development/generated-connecting-memories.md",
-        "childhood_memories": "development/childhood-memories.md",
-        "positive_memories": "development/positive-memories.md",
-        "friend_character": "development/friend-character.md",
-        "romantic_relationship": "development/romantic-relationship.md",
+    # {content_type: (path relative to content/clara, consolidated-backstory header)}
+    # Dict order is the consolidated-backstory presentation order.
+    CONTENT = {
+        "character_gist": ("clara-character-gist.md", "# Character Overview"),
+        "connecting_memories": ("development/generated-connecting-memories.md", "# Key Life Experiences"),
+        "childhood_memories": ("development/childhood-memories.md", "# Childhood Context"),
+        "positive_memories": ("development/positive-memories.md", "# Positive Memories"),
+        "friend_character": ("development/friend-character.md", "# Important Relationships"),
+        "romantic_relationship": ("development/romantic-relationship.md", "# Romantic Relationship History"),
     }
-
-    # Section headers for the consolidated backstory, in presentation order
-    _BACKSTORY_SECTIONS = [
-        ("character_gist", "# Character Overview"),
-        ("connecting_memories", "# Key Life Experiences"),
-        ("childhood_memories", "# Childhood Context"),
-        ("positive_memories", "# Positive Memories"),
-        ("friend_character", "# Important Relationships"),
-        ("romantic_relationship", "# Romantic Relationship History"),
-    ]
 
     def __init__(self, config=None):
         self.config = config or conversation_config
         # Base path to content directory
         self.content_base_path = Path(__file__).parent.parent.parent / "content" / "clara"
 
-        # Keyword mapping for content selection
+        # Keyword mapping for content selection, keyed by the content type the
+        # keywords select ("general" is handled separately in select_relevant_content;
+        # work-related queries fall back to the general character gist).
         self.content_keywords = {
-            "childhood": [
+            "childhood_memories": [
                 "childhood", "child", "young", "mother", "mom", "family", "growing up",
                 "when I was little", "parents", "siblings", "school", "elementary",
                 "kindergarten", "teenage", "teenager", "high school"
             ],
-            "positive": [
+            "positive_memories": [
                 "happy", "best", "favorite", "wonderful", "amazing", "love", "joy",
                 "good times", "celebration", "success", "achievement", "proud",
                 "excited", "thrilled", "delighted", "grateful", "blessed"
             ],
-            "difficult": [
+            "connecting_memories": [
                 "sad", "difficult", "hard", "worst", "dreadful", "tough", "struggle",
                 "pain", "loss", "grief", "hurt", "trauma", "depression", "anxiety",
                 "stress", "overwhelmed", "breakdown", "crisis", "failure"
             ],
-            "relationships": [
+            "friend_character": [
                 "friends", "friend", "people", "someone", "relationship", "social",
                 "together", "dating", "boyfriend", "girlfriend", "romantic", "love",
                 "breakup", "marriage", "partner", "friendship", "connection"
             ],
-            "work": [
+            "character_gist": [
                 "work", "job", "career", "office", "colleague", "professional",
                 "deadline", "project", "boss", "manager", "workplace", "employment",
                 "interview", "promotion", "business", "company"
@@ -80,12 +74,12 @@ class CharacterContentService:
         if content_type in self._content_cache:
             return self._content_cache[content_type]
 
-        relative_path = self.CONTENT_FILES.get(content_type)
-        if relative_path is None:
+        entry = self.CONTENT.get(content_type)
+        if entry is None:
             logger.error(f"Unknown content type: {content_type}")
             return ""
 
-        path = self.content_base_path / relative_path
+        path = self.content_base_path / entry[0]
         try:
             if not path.exists():
                 logger.warning(f"Content file not found: {path}")
@@ -103,7 +97,7 @@ class CharacterContentService:
     def get_consolidated_backstory(self) -> str:
         """Get consolidated backstory for LLM prompts"""
         backstory_parts = []
-        for content_type, header in self._BACKSTORY_SECTIONS:
+        for content_type, (_, header) in self.CONTENT.items():
             content = self.load(content_type)
             if content:
                 backstory_parts.append(f"{header}\n{content}")
@@ -115,19 +109,12 @@ class CharacterContentService:
     async def select_relevant_content(
         self,
         user_message: str,
-        conversation_history: Optional[str] = None,
         max_chars: Optional[int] = None
     ) -> Dict:
         """
         Select relevant backstory content based on user message keywords.
 
-        Args:
-            user_message: The user's message to analyze for context
-            conversation_history: Optional conversation history for additional context
-            max_chars: Maximum character limit for selected content
-
-        Returns:
-            Dictionary containing selected content and metadata
+        Returns a dict with keys: content, content_types, char_count.
         """
         try:
             logger.info(f"Selecting relevant content for message: '{user_message[:50]}...'")
@@ -135,19 +122,15 @@ class CharacterContentService:
             message_lower = user_message.lower()
             selected_content = []
             content_types = []
-            selection_reasoning = []
 
-            # Analyze for keyword matches and select content
             keyword_matches = self._analyze_keyword_matches(message_lower)
 
-            # Select content based on keyword matches and priorities
             for content_type, match_count in keyword_matches.items():
                 if match_count > 0:
                     content = self.load(content_type)
                     if content:
                         selected_content.append(content)
                         content_types.append(content_type)
-                        selection_reasoning.append(f"{content_type}: {match_count} keyword matches")
 
             # Default fallback to character gist for general queries or no matches
             if not selected_content or any(kw in message_lower for kw in self.content_keywords["general"]):
@@ -155,115 +138,53 @@ class CharacterContentService:
                 if gist_content and "character_gist" not in content_types:
                     selected_content.append(gist_content)
                     content_types.append("character_gist")
-                    selection_reasoning.append("character_gist: fallback for general query")
 
-            # Combine and limit content for token efficiency
-            combined_content = self._combine_and_limit_content(
+            combined = self._combine_and_limit_content(
                 selected_content,
                 max_chars or self.config.MAX_BACKSTORY_CHARS
             )
 
-            result = {
-                "content": combined_content["content"],
+            logger.info(f"Selected content: {len(content_types)} types, {len(combined)} chars")
+            return {
+                "content": combined,
                 "content_types": content_types,
-                "char_count": combined_content["char_count"],
-                "estimated_tokens": combined_content["estimated_tokens"],
-                "char_limit_used": max_chars or self.config.MAX_BACKSTORY_CHARS,
-                "selection_reasoning": "; ".join(selection_reasoning),
-                "keyword_matches": keyword_matches,
-                "truncated": combined_content["truncated"]
+                "char_count": len(combined),
             }
-
-            logger.info(f"Selected content: {len(content_types)} types, {result['char_count']} chars, {result['estimated_tokens']} tokens")
-            return result
 
         except Exception as e:
             logger.error(f"Error selecting relevant content: {str(e)}")
-            # Return fallback content
             return self._get_fallback_content(max_chars)
 
     def _analyze_keyword_matches(self, message_lower: str) -> Dict[str, int]:
-        """Analyze message for keyword matches and return match counts by content type."""
-        keyword_matches = {}
+        """Match counts by content type, sorted by priority then match count."""
+        keyword_matches = {
+            content_type: sum(1 for keyword in keywords if keyword in message_lower)
+            for content_type, keywords in self.content_keywords.items()
+            if content_type != "general"  # handled separately by the caller
+        }
+        return dict(sorted(
+            keyword_matches.items(),
+            key=lambda kv: (self.config.CONTENT_TYPE_PRIORITIES.get(kv[0], 0), kv[1]),
+            reverse=True
+        ))
 
-        for content_type, keywords in self.content_keywords.items():
-            # Skip 'general' as it's handled separately
-            if content_type == "general":
-                continue
-
-            match_count = sum(1 for keyword in keywords if keyword in message_lower)
-
-            # Map content types to actual content types
-            content_type_mapping = {
-                "childhood": "childhood_memories",
-                "positive": "positive_memories",
-                "difficult": "connecting_memories",
-                "relationships": "friend_character",
-                "work": "character_gist"  # Work-related falls back to general character info
-            }
-
-            mapped_type = content_type_mapping.get(content_type, content_type)
-            keyword_matches[mapped_type] = match_count
-
-        # Sort by priority and match count
-        sorted_matches = {}
-        for content_type in sorted(keyword_matches.keys(),
-                                 key=lambda x: (self.config.CONTENT_TYPE_PRIORITIES.get(x, 0), keyword_matches[x]),
-                                 reverse=True):
-            sorted_matches[content_type] = keyword_matches[content_type]
-
-        return sorted_matches
-
-    def _combine_and_limit_content(self, content_list: List[str], char_limit: int) -> Dict:
-        """Combine content pieces and apply character limit."""
+    def _combine_and_limit_content(self, content_list: List[str], char_limit: int) -> str:
+        """Combine content pieces and apply the character limit."""
         combined_content = "\n\n".join(filter(None, content_list))
-        truncated = False
-
         if len(combined_content) > char_limit:
             combined_content = combined_content[:char_limit-3] + "..."
-            truncated = True
-
-        return {
-            "content": combined_content,
-            "char_count": len(combined_content),
-            "estimated_tokens": len(combined_content) // 4,  # Rough estimation: 4 chars per token
-            "truncated": truncated
-        }
+        return combined_content
 
     def _get_fallback_content(self, max_chars: Optional[int] = None) -> Dict:
-        """Get fallback content when selection fails."""
-        try:
-            gist_content = self.load("character_gist")
-            if not gist_content:
-                gist_content = "Clara is a 22-year-old creative strategist with a dry wit and observant nature."
-
-            char_limit = max_chars or self.config.MAX_BACKSTORY_CHARS
-            limited_content = self._combine_and_limit_content([gist_content], char_limit)
-
-            return {
-                "content": limited_content["content"],
-                "content_types": ["character_gist"],
-                "char_count": limited_content["char_count"],
-                "estimated_tokens": limited_content["estimated_tokens"],
-                "char_limit_used": char_limit,
-                "selection_reasoning": "fallback due to error",
-                "keyword_matches": {},
-                "truncated": limited_content["truncated"],
-                "fallback_mode": True
-            }
-
-        except Exception as e:
-            logger.error(f"Error getting fallback content: {str(e)}")
-            # Return minimal fallback
-            return {
-                "content": "Clara is a 22-year-old creative strategist.",
-                "content_types": ["minimal_fallback"],
-                "char_count": 43,
-                "estimated_tokens": 11,
-                "char_limit_used": max_chars or self.config.MAX_BACKSTORY_CHARS,
-                "selection_reasoning": "minimal fallback due to system error",
-                "keyword_matches": {},
-                "truncated": False,
-                "fallback_mode": True,
-                "error": str(e)
-            }
+        """Fallback content when selection fails: the gist, or a one-liner."""
+        gist_content = self.load("character_gist") or (
+            "Clara is a 22-year-old creative strategist with a dry wit and observant nature."
+        )
+        combined = self._combine_and_limit_content(
+            [gist_content], max_chars or self.config.MAX_BACKSTORY_CHARS
+        )
+        return {
+            "content": combined,
+            "content_types": ["character_gist"],
+            "char_count": len(combined),
+        }

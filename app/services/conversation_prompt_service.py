@@ -107,23 +107,18 @@ RIGHT WAY: "I just kept going until my feet were bleeding through my tights. I d
     def _get_global_mood_context(self, global_mood: str = "stressed", stress_level: int = 65) -> str:
         """Generate global mood context for the prompt"""
         # Default to stressed based on story requirements
-        global_context = f"Your underlying GLOBAL mood today is {{mood: '{global_mood}', stress: {stress_level}}} because a work deadline is approaching."
-        return global_context
+        return f"Your underlying GLOBAL mood today is {{mood: '{global_mood}', stress: {stress_level}}} because a work deadline is approaching."
     
-    def _get_conversation_emotion_context(self, conversation_emotion: EmotionType, user_message: str) -> str:
+    def _get_conversation_emotion_context(self, conversation_emotion: EmotionType) -> str:
         """Generate conversation-specific emotion context"""
-        emotion_pattern = self.EMOTION_LINGUISTIC_PATTERNS[conversation_emotion]
-        
-        # Context based on emotion type
-        emotion_contexts = {
-            EmotionType.CALM: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're in a focused, helpful state",
-            EmotionType.HAPPY: f"you are feeling {{mood: '{conversation_emotion.value}'}} because something positive just happened or you're in a good mood",
-            EmotionType.SAD: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're reflecting on something difficult or disappointing",
-            EmotionType.STRESSED: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're feeling overwhelmed with responsibilities",
-            EmotionType.SASSY: f"you are feeling {{mood: '{conversation_emotion.value}'}} because you're in a playful, witty mood"
+        reasons = {
+            EmotionType.CALM: "you're in a focused, helpful state",
+            EmotionType.HAPPY: "something positive just happened or you're in a good mood",
+            EmotionType.SAD: "you're reflecting on something difficult or disappointing",
+            EmotionType.STRESSED: "you're feeling overwhelmed with responsibilities",
+            EmotionType.SASSY: "you're in a playful, witty mood",
         }
-        
-        return emotion_contexts[conversation_emotion]
+        return f"you are feeling {{mood: '{conversation_emotion.value}'}} because {reasons[conversation_emotion]}"
     
     def _build_emotion_guidance(self, emotion: EmotionType) -> str:
         """Build specific guidance for the chosen emotion"""
@@ -161,7 +156,6 @@ When responding as {emotion.value}, use this linguistic pattern:
     def select_conversation_emotion_with_mood(
         self,
         user_message: str,
-        conversation_history: Optional[str] = None,
         blended_mood_score: float = 60.0,
         mood_transition_data: Optional[Dict] = None
     ) -> Tuple[EmotionType, str]:
@@ -170,7 +164,6 @@ When responding as {emotion.value}, use this linguistic pattern:
 
         Args:
             user_message: User's message
-            conversation_history: Optional conversation context
             blended_mood_score: Blended mood score from MoodTransitionAnalyzer (0-100)
             mood_transition_data: Complete mood transition analysis result
 
@@ -182,10 +175,6 @@ When responding as {emotion.value}, use this linguistic pattern:
                 return self._emotion_with_reasoning(user_message)
 
             # Get mood context from transition analyzer
-            mood_context = mood_transition_data.get("mood_context", {})
-            mood_category = mood_context.get("mood_category", "neutral")
-            transition_triggered = mood_transition_data.get("transition_triggered", False)
-            transition_type = mood_transition_data.get("transition_type")
 
             base_emotion, _ = self._emotion_with_reasoning(user_message)
 
@@ -206,7 +195,7 @@ When responding as {emotion.value}, use this linguistic pattern:
                     reasoning = f"Adjusted from happy to calm due to low mood ({blended_mood_score}/100)"
                 elif base_emotion == EmotionType.SASSY:
                     adjusted_emotion = EmotionType.STRESSED
-                    reasoning = f"Adjusted from sassy to stressed due to low mood"
+                    reasoning = "Adjusted from sassy to stressed due to low mood"
                 else:
                     adjusted_emotion = base_emotion
                     reasoning = f"Maintaining {base_emotion} emotion, appropriate for current mood"
@@ -218,7 +207,7 @@ When responding as {emotion.value}, use this linguistic pattern:
                     reasoning = f"Adjusted from sad to calm due to high mood ({blended_mood_score}/100)"
                 elif base_emotion == EmotionType.STRESSED:
                     adjusted_emotion = EmotionType.HAPPY
-                    reasoning = f"Adjusted from stressed to happy due to high mood"
+                    reasoning = "Adjusted from stressed to happy due to high mood"
                 else:
                     adjusted_emotion = base_emotion
                     reasoning = f"Maintaining {base_emotion} emotion, enhanced by good mood"
@@ -227,13 +216,6 @@ When responding as {emotion.value}, use this linguistic pattern:
                 # Moderate mood - use base emotion with mood influence
                 adjusted_emotion = base_emotion
                 reasoning = f"Using {base_emotion} emotion, mood ({blended_mood_score}/100) supports this choice"
-
-            # Additional adjustment for significant transitions
-            if transition_triggered and transition_type:
-                if transition_type == "significant_shift":
-                    reasoning += f" (experiencing significant mood shift)"
-                elif transition_type == "sustained_change":
-                    reasoning += f" (mood has been changing gradually)"
 
             logger.info(f"Selected emotion {adjusted_emotion} with mood awareness. {reasoning}")
             return adjusted_emotion, reasoning
@@ -299,7 +281,7 @@ When responding as {emotion.value}, use this linguistic pattern:
 
         # Build the prompt components
         global_context = self._get_global_mood_context(global_mood, stress_level)
-        conversation_context = self._get_conversation_emotion_context(conversation_emotion, user_message)
+        conversation_context = self._get_conversation_emotion_context(conversation_emotion)
         emotion_guidance = self._build_emotion_guidance(conversation_emotion)
 
         # History context if available
@@ -426,7 +408,7 @@ Response format:
             stress = global_state.get("stress", {}).get("numeric_value", 50)
             energy = global_state.get("energy", {}).get("numeric_value", 70)
 
-            context_parts.append(f"\n\nCURRENT STATE:")
+            context_parts.append("\n\nCURRENT STATE:")
             context_parts.append(f"- Mood: {mood}/100, Stress: {stress}/100, Energy: {energy}/100")
 
         # Adaptive instruction based on content selection

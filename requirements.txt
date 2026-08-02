@@ -1,8 +1,6 @@
 # Core FastAPI - Latest 2025 versions
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-python-multipart==0.0.18
-gunicorn==22.0.0
 
 # AI/NLP - Latest versions
 openai==1.99.9
@@ -25,15 +23,12 @@ pyjwt[crypto]==2.9.0
 
 # Additional modern dependencies
 httpx==0.28.1
-typing-extensions==4.12.2
-requests
 
 # Redis for caching and conversation history
 redis==5.2.1
 
 # Celery for background tasks and simulation engine
 celery[redis]==5.4.0
-celery[eventlet]==5.4.0
 
 # Payment Processing - Stripe integration
 stripe==11.1.1

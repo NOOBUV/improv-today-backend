@@ -6,24 +6,9 @@ import logging
 import time
 import traceback
 import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict
-
-
-class _Step:
-    """Metadata holder yielded by ConversationPerformanceMonitor.step()."""
-
-    def __init__(self):
-        self.metadata = {}
-
-    def meta(self, **kw):
-        self.metadata.update(kw)
-
-
-def maybe_step(monitor, ctx, name):
-    """step() when a timing context exists, otherwise a no-op context manager."""
-    return monitor.step(ctx, name) if ctx else nullcontext(_Step())
 
 
 class ConversationPerformanceMonitor:
@@ -113,16 +98,19 @@ class ConversationPerformanceMonitor:
 
     @contextmanager
     def step(self, ctx, name):
-        """Time a sub-operation; records on exit, re-raises on error."""
-        s = _Step()
+        """Time a sub-operation; records on exit, re-raises on error.
+
+        Yields a plain dict — callers stash metadata via s.update(...).
+        """
+        s: Dict[str, Any] = {}
         start = time.time()
         sub_started = datetime.now(timezone.utc).isoformat()
         try:
             yield s
         except Exception as e:
-            self._record(ctx, name, start, sub_started, error=str(e), **s.metadata)
+            self._record(ctx, name, start, sub_started, error=str(e), **s)
             raise  # NEVER swallow — caller's try/except owns control flow
-        self._record(ctx, name, start, sub_started, **s.metadata)
+        self._record(ctx, name, start, sub_started, **s)
 
     def _record(self, context: Dict[str, Any], sub_operation: str, start_time: float, start_timestamp: str, **metadata) -> None:
         """Record timing and metadata for a completed sub-operation."""
@@ -163,17 +151,14 @@ class ConversationPerformanceMonitor:
             )
 
     def _check_performance_thresholds(self, metrics: Dict[str, Any]) -> None:
-        """Check if performance metrics exceed defined thresholds."""
-        correlation_id = metrics["correlation_id"]
-        operation = metrics["operation"]
+        """Check if total response time exceeds the defined threshold."""
         total_duration = metrics["total_duration_ms"]
 
-        # Check total response time
-        if operation == "enhanced_conversation_response" and total_duration > self.alert_thresholds["total_response_time_ms"]:
+        if total_duration > self.alert_thresholds["total_response_time_ms"]:
             self.performance_logger.warning(
-                f"[{correlation_id}] Total conversation response time exceeded threshold: {total_duration:.2f}ms > {self.alert_thresholds['total_response_time_ms']}ms",
+                f"[{metrics['correlation_id']}] Total conversation response time exceeded threshold: {total_duration:.2f}ms > {self.alert_thresholds['total_response_time_ms']}ms",
                 extra={
-                    "correlation_id": correlation_id,
+                    "correlation_id": metrics["correlation_id"],
                     "total_duration_ms": total_duration,
                     "threshold_ms": self.alert_thresholds["total_response_time_ms"],
                     "event_type": "total_threshold_exceeded",
@@ -202,44 +187,3 @@ class ConversationPerformanceMonitor:
                 "sub_operations_completed": context.get("sub_operations", {})
             }
         )
-
-    def log_detailed_timing_breakdown(self, metrics: Dict[str, Any]) -> None:
-        """Log detailed timing breakdown for conversation analysis."""
-        correlation_id = metrics["correlation_id"]
-        operation = metrics["operation"]
-        total_duration = metrics["total_duration_ms"]
-        sub_operations = metrics.get("sub_operations", {})
-
-        # Create a detailed breakdown log
-        breakdown_lines = [f"[{correlation_id}] DETAILED TIMING BREAKDOWN for {operation} ({total_duration:.2f}ms total):"]
-
-        # Sort sub-operations by duration (slowest first)
-        sorted_ops = sorted(sub_operations.items(), key=lambda x: x[1].get("duration_ms", 0), reverse=True)
-
-        for op_name, op_data in sorted_ops:
-            duration = op_data.get("duration_ms", 0)
-            percentage = (duration / total_duration * 100) if total_duration > 0 else 0
-
-            # Add warning emoji for operations exceeding thresholds
-            threshold_key = f"{op_name}_ms"
-            warning = ""
-            if threshold_key in self.alert_thresholds and duration > self.alert_thresholds[threshold_key]:
-                warning = " ⚠️ SLOW"
-                exceeded_by = duration - self.alert_thresholds[threshold_key]
-                warning += f" (+{exceeded_by:.1f}ms over {self.alert_thresholds[threshold_key]}ms threshold)"
-
-            breakdown_lines.append(f"  • {op_name}: {duration:.2f}ms ({percentage:.1f}%){warning}")
-
-            # Add metadata if available
-            metadata = {k: v for k, v in op_data.items() if k not in ['duration_ms', 'start_timestamp', 'end_timestamp']}
-            if metadata:
-                breakdown_lines.append(f"    └─ {metadata}")
-
-        # Log the complete breakdown
-        self.performance_logger.info("\n".join(breakdown_lines), extra={
-            "correlation_id": correlation_id,
-            "event_type": "detailed_timing_breakdown",
-            "total_duration_ms": total_duration,
-            "operation": operation,
-            "sub_operations_count": len(sub_operations)
-        })

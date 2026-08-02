@@ -521,7 +521,7 @@ async def create_payment_intent(
 
 
 @router.get("/status", response_model=SubscriptionStatus)
-async def get_subscription_status(
+async def get_subscription_status_current(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
