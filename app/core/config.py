@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # OpenAI Configuration
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
+    # Gemini Configuration (Clara's conversation model, via OpenAI-compatible endpoint)
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     
     # Supabase Database Configuration
     database_url: str = os.getenv("DATABASE_URL", "")
@@ -72,3 +75,5 @@ if settings.is_production:
         raise RuntimeError("JWT_SECRET must be set in production")
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY must be set in production")
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY must be set in production")

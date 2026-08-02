@@ -21,7 +21,14 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
-OPENAI_MODEL = "gpt-4o-mini"
+# Gemini speaks OpenAI's wire protocol, so the AsyncOpenAI client stays.
+# ponytail: newest flash-class model this key can reach (2.5-flash is closed to new keys).
+CLARA_MODEL = "gemini-3.6-flash"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Gemini 3 thinks by default and its reasoning eats max_tokens: at the default effort
+# the 400-token budget is gone before the JSON reply starts (finish_reason=length).
+# "low" is the floor this model accepts ("none" is rejected) and keeps TTFT short.
+CLARA_REASONING_EFFORT = "low"
 
 # Voice options for the fallback path only (the enhanced path builds its own prompt).
 FALLBACK_PERSONALITY_PROMPTS = {
@@ -51,7 +58,7 @@ class ClaraConversationService:
         self.state_manager_service = StateManagerService()
         self.session_state_service = SessionStateService()
         self.event_selection_service = EventSelectionService()
-        self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self.openai_client = AsyncOpenAI(api_key=settings.gemini_api_key, base_url=GEMINI_BASE_URL) if settings.gemini_api_key else None
         self.performance_monitor = ConversationPerformanceMonitor()
 
     async def generate_enhanced_response(
@@ -496,7 +503,8 @@ class ClaraConversationService:
 
         with self.performance_monitor.step(timing_context, "openai_api_call") as s:
             response = await self.openai_client.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=CLARA_MODEL,
+                reasoning_effort=CLARA_REASONING_EFFORT,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -508,7 +516,7 @@ class ClaraConversationService:
             ai_response_raw = response.choices[0].message.content
 
             s.update(
-                model=OPENAI_MODEL,
+                model=CLARA_MODEL,
                 prompt_tokens=len(system_prompt.split()),
                 max_tokens=400,
                 response_length=len(ai_response_raw) if ai_response_raw else 0
@@ -574,7 +582,8 @@ class ClaraConversationService:
 
             # AsyncOpenAI streams without blocking the event loop; chunks go out as they land
             stream = await self.openai_client.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=CLARA_MODEL,
+                reasoning_effort=CLARA_REASONING_EFFORT,
                 messages=[
                     {"role": "system", "content": prepared["system_prompt"]},
                     {"role": "user", "content": user_message}
@@ -659,7 +668,8 @@ class ClaraConversationService:
         history_context = f"\n\nRecent conversation:\n{conversation_history}" if conversation_history else ""
 
         response = await self.openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=CLARA_MODEL,
+            reasoning_effort=CLARA_REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": (
                     f"{base_prompt}\n\n"
