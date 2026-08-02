@@ -64,7 +64,7 @@ def hermetic_service():
         ),
         'session_state_service': Mock(
             add_conversation_message=AsyncMock(),
-            get_conversation_history=AsyncMock(return_value=[]),
+            get_conversation_history=AsyncMock(return_value="user: earlier\nassistant: context"),
         ),
         'event_selection_service': Mock(
             get_contextual_events=AsyncMock(return_value=[
@@ -143,6 +143,11 @@ async def test_stream_yields_sse_sequence_and_persists(hermetic_service):
 
     openai_client.chat.completions.create.assert_awaited_once()
     assert openai_client.chat.completions.create.await_args.kwargs["stream"] is True
+
+    # History-threading lock: session history must reach the prompt builder
+    # (this arg was once silently dropped by an over-broad edit — keep this pinned)
+    prompt_kwargs = deps['conversation_prompt_service'].construct_conversation_prompt_with_mood.call_args.kwargs
+    assert prompt_kwargs["conversation_history"] == "user: earlier\nassistant: context"
 
 
 @pytest.mark.asyncio

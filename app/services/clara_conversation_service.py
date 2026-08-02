@@ -150,7 +150,8 @@ class ClaraConversationService:
                             user_id=user_id,
                             conversation_id=conversation_id,
                             simulation_context=simulation_context,
-                                                        timing_context=timing_context,
+                            conversation_history=conversation_history,
+                            timing_context=timing_context,
                             correlation_id=correlation_id
                         )
 
@@ -159,7 +160,8 @@ class ClaraConversationService:
                         response = await self._respond(
                             user_message=user_message,
                             simulation_context=simulation_context,
-                                                        timing_context=timing_context
+                            conversation_history=conversation_history,
+                            timing_context=timing_context
                         )
 
                         s.update(
