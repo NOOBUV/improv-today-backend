@@ -5,10 +5,12 @@ Handles scheduled and manual journal generation operations.
 
 import logging
 import asyncio
+import uuid
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from celery import Task
 from celery_app import celery_app
@@ -23,6 +25,41 @@ logger = logging.getLogger(__name__)
 
 class DatabaseTask(Task):
     """Base task class that provides database session handling"""
+
+
+async def _insert_journal_entry(
+    session: AsyncSession,
+    journal_data: Dict[str, Any],
+    reviewed_by: Optional[str] = None
+) -> Optional[str]:
+    """
+    Insert the journal entry for its date. Returns the new entry_id, or None if an
+    entry for that date already exists.
+
+    ponytail: ON CONFLICT instead of SELECT-then-INSERT — the pre-checks in the tasks
+    are not atomic, so a concurrent/redelivered run used to blow up on
+    ix_journal_entries_entry_date. The unique index is the source of truth.
+    """
+    stmt = (
+        pg_insert(JournalEntries)
+        .values(
+            entry_id=str(uuid.uuid4()),
+            entry_date=journal_data["entry_date"],
+            content=journal_data["content"],
+            status=journal_data["status"],
+            events_processed=journal_data["events_processed"],
+            emotional_theme=journal_data["emotional_theme"],
+            generated_at=journal_data["generated_at"],
+            character_count=len(journal_data["content"]),
+            reviewed_by=reviewed_by,
+        )
+        .on_conflict_do_nothing(index_elements=["entry_date"])
+        .returning(JournalEntries.entry_id)
+    )
+
+    entry_id = (await session.execute(stmt)).scalar_one_or_none()
+    await session.commit()
+    return entry_id
 
 
 async def _generate_daily_journal_entry_async(task_id: str, target_date_str: Optional[str] = None) -> Dict[str, Any]:
@@ -72,20 +109,22 @@ async def _generate_daily_journal_entry_async(task_id: str, target_date_str: Opt
                 "reason": "No events found"
             }
 
-        # Create journal entry in database
-        journal_entry = JournalEntries(
-            entry_date=journal_data["entry_date"],
-            content=journal_data["content"],
-            status=journal_data["status"],
-            events_processed=journal_data["events_processed"],
-            emotional_theme=journal_data["emotional_theme"],
-            generated_at=journal_data["generated_at"],
-            character_count=len(journal_data["content"])
-        )
+        # Create journal entry in database (no-op if another run got there first)
+        entry_id = await _insert_journal_entry(session, journal_data)
 
-        session.add(journal_entry)
-        await session.commit()
-        await session.refresh(journal_entry)
+        if entry_id is None:
+            logger.info(f"Journal entry for {target_date} was created concurrently, skipping")
+            await _log_generation_attempt(
+                session, target_date, "skipped", 0, 0,
+                task_id, "scheduled",
+                error_message="Entry already exists"
+            )
+            return {
+                "success": True,
+                "skipped": True,
+                "target_date": target_date.isoformat(),
+                "reason": "Entry already exists"
+            }
 
         # Calculate generation duration
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
@@ -98,11 +137,11 @@ async def _generate_daily_journal_entry_async(task_id: str, target_date_str: Opt
             duration_ms=duration_ms, llm_model="gpt-4o-mini"
         )
 
-        logger.info(f"Successfully generated journal entry {journal_entry.entry_id} for {target_date}")
+        logger.info(f"Successfully generated journal entry {entry_id} for {target_date}")
 
         return {
             "success": True,
-            "entry_id": journal_entry.entry_id,
+            "entry_id": entry_id,
             "target_date": target_date.isoformat(),
             "events_processed": journal_data["events_processed"],
             "content_length": len(journal_data["content"]),
@@ -189,21 +228,22 @@ async def _manual_generate_journal_entry_async(
                 "reason": "No events found for journal generation"
             }
 
-        # Create journal entry in database
-        journal_entry = JournalEntries(
-            entry_date=journal_data["entry_date"],
-            content=journal_data["content"],
-            status=journal_data["status"],
-            events_processed=journal_data["events_processed"],
-            emotional_theme=journal_data["emotional_theme"],
-            generated_at=journal_data["generated_at"],
-            character_count=len(journal_data["content"]),
-            reviewed_by=admin_user  # Mark as manually generated
-        )
+        # Create journal entry in database (no-op if another run got there first)
+        entry_id = await _insert_journal_entry(session, journal_data, reviewed_by=admin_user)
 
-        session.add(journal_entry)
-        await session.commit()
-        await session.refresh(journal_entry)
+        if entry_id is None:
+            logger.info(f"Manual generation skipped - entry for {target_date} was created concurrently")
+            await _log_generation_attempt(
+                session, target_date, "skipped", 0, 0,
+                task_id, "manual",
+                error_message="Entry already exists"
+            )
+            return {
+                "success": True,
+                "skipped": True,
+                "target_date": target_date.isoformat(),
+                "reason": "Entry already exists (use force_regenerate=true to override)"
+            }
 
         # Calculate generation duration
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
@@ -216,11 +256,11 @@ async def _manual_generate_journal_entry_async(
             duration_ms=duration_ms, llm_model="gpt-4o-mini"
         )
 
-        logger.info(f"Successfully manually generated journal entry {journal_entry.entry_id} for {target_date}")
+        logger.info(f"Successfully manually generated journal entry {entry_id} for {target_date}")
 
         return {
             "success": True,
-            "entry_id": journal_entry.entry_id,
+            "entry_id": entry_id,
             "target_date": target_date.isoformat(),
             "events_processed": journal_data["events_processed"],
             "content_length": len(journal_data["content"]),

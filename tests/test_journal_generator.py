@@ -322,6 +322,38 @@ class TestJournalCeleryTasks:
         assert hasattr(cleanup_old_generation_logs, 'delay')
         assert cleanup_old_generation_logs.name == "journal.cleanup_old_logs"
 
+    @pytest.mark.asyncio
+    @patch('app.services.journal.tasks.AsyncSessionLocal')
+    @patch('app.services.journal.tasks.JournalGeneratorService')
+    async def test_daily_generation_skips_when_insert_conflicts(self, mock_service_class, mock_session_class):
+        """A concurrent run winning the race must skip, not raise UniqueViolation"""
+        from app.services.journal.tasks import _generate_daily_journal_entry_async
+
+        # Pre-check finds nothing; the ON CONFLICT insert returns no row (entry exists)
+        result = Mock()
+        result.scalar_one_or_none = Mock(return_value=None)
+        session = Mock(spec=AsyncSession)
+        session.execute = AsyncMock(return_value=result)
+        session.add = Mock()
+        session.commit = AsyncMock()
+        session.close = AsyncMock()
+        mock_session_class.return_value = session
+
+        mock_service_class.return_value.generate_daily_journal = AsyncMock(return_value={
+            "entry_date": date(2025, 9, 17),
+            "content": "Test content",
+            "status": "draft",
+            "events_processed": 3,
+            "emotional_theme": "positive",
+            "generated_at": datetime(2025, 9, 17, 23, 0, tzinfo=timezone.utc),
+        })
+
+        outcome = await _generate_daily_journal_entry_async("task-1", "2025-09-17")
+
+        assert outcome["success"] is True
+        assert outcome["skipped"] is True
+        assert "error" not in outcome
+
 
 # Fixtures for shared test data
 @pytest.fixture
