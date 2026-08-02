@@ -288,12 +288,46 @@ class SessionStateService:
             session_id = f"{user_id}:{conversation_id}"
             success = await self._store_session_state(session_id, session_state)
 
+            await self._log_message_durably(
+                user_id, conversation_id, message_type, message_content, metadata
+            )
+
             logger.debug(f"Added {message_type} message to {session_id}")
             return success
 
         except Exception as e:
             logger.error(f"Error adding conversation message: {e}")
             return False
+
+    async def _log_message_durably(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Append the turn to conversation_log. Redis session state expires after
+        session_ttl; this row does not.
+
+        Best-effort: logging must never fail a conversation turn.
+        """
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.conversation_log import ConversationLog
+
+            async with AsyncSessionLocal() as session:
+                session.add(ConversationLog(
+                    user_id=str(user_id),
+                    conversation_id=str(conversation_id),
+                    role=role,
+                    content=content,
+                    meta=metadata or None,
+                ))
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"conversation_log write failed (turn unaffected): {e}")
 
     async def get_conversation_history(
         self,

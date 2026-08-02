@@ -8,8 +8,10 @@ import logging
 
 from app.core.database import get_db
 from app.auth.subscription_guard import require_active_subscription
+from app.auth.dependencies import get_current_user
 from app.models.user import User
 from app.models.clara_state import ClaraState
+from app.models.conversation_log import ConversationLog
 from app.schemas.clara import (
     ConversationRequest,
     ConversationResponse,
@@ -131,6 +133,36 @@ async def conversation(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing conversation: {str(e)}"
         )
+
+
+@router.get("/conversation/log")
+async def get_conversation_log(
+    limit: int = 100,
+    conversation_id: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Durable transcript for the current user, newest first."""
+    query = db.query(ConversationLog).filter(
+        ConversationLog.user_id == str(current_user.id)
+    )
+    if conversation_id:
+        query = query.filter(ConversationLog.conversation_id == conversation_id)
+
+    rows = query.order_by(ConversationLog.created_at.desc(), ConversationLog.id.desc()) \
+                .limit(min(max(limit, 1), 500)).all()
+
+    return [
+        {
+            "id": r.id,
+            "conversation_id": r.conversation_id,
+            "role": r.role,
+            "content": r.content,
+            "meta": r.meta,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/state", response_model=List[ClaraStateRead])
