@@ -185,3 +185,14 @@ async def test_fallback_stream_yields_sse_events_not_a_dict(hermetic_service):
     assert stored["message_type"] == "assistant"
     assert stored["message_content"] == fallback_text
     assert stored["metadata"]["fallback_mode"] is True
+
+
+class TestPersonalityKeyAlignment:
+    """The frontend sends 'friendly' | 'sassy' | 'blunt' (claraStore.ts) — each
+    must resolve to its own prompt, not silently fall back to the default."""
+
+    def test_client_personality_values_resolve(self):
+        from app.services.clara_conversation_service import FALLBACK_PERSONALITY_PROMPTS
+        prompts = {p: FALLBACK_PERSONALITY_PROMPTS.get(p) for p in ("friendly", "sassy", "blunt")}
+        assert all(prompts.values()), f"missing keys: {[k for k, v in prompts.items() if not v]}"
+        assert len(set(prompts.values())) == 3, "personalities must have distinct prompts"

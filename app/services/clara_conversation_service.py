@@ -25,9 +25,9 @@ OPENAI_MODEL = "gpt-4o-mini"
 
 # Voice options for the fallback path only (the enhanced path builds its own prompt).
 FALLBACK_PERSONALITY_PROMPTS = {
-    "sassy_english": "You are a witty, sassy English conversation partner with a charming British accent in your responses. Be playful, slightly cheeky, but encouraging.",
-    "blunt_american": "You are a direct, no-nonsense American conversation partner. Be straightforward, honest, and practical while remaining supportive.",
-    "friendly_neutral": "You are a warm, encouraging conversation partner. Be supportive, patient, and genuinely interested in the conversation.",
+    "sassy": "You are a witty, sassy English conversation partner with a charming British accent in your responses. Be playful, slightly cheeky, but encouraging.",
+    "blunt": "You are a direct, no-nonsense American conversation partner. Be straightforward, honest, and practical while remaining supportive.",
+    "friendly": "You are a warm, encouraging conversation partner. Be supportive, patient, and genuinely interested in the conversation.",
 }
 
 
@@ -60,7 +60,7 @@ class ClaraConversationService:
         user_id: str,
         conversation_id: str,
         conversation_history: Optional[str] = None,
-        personality: str = "friendly_neutral",
+        personality: str = "friendly",
         user_preferences: Optional[Dict[str, Any]] = None,
         fresh_events: Optional[List[Dict[str, Any]]] = None,
         stream: bool = False
@@ -642,7 +642,7 @@ class ClaraConversationService:
         self,
         user_message: str,
         conversation_history: Optional[str],
-        personality: str = "friendly_neutral"
+        personality: str = "friendly"
     ) -> str:
         """Clara's plain reply when the enhanced path is unavailable.
 
@@ -652,7 +652,7 @@ class ClaraConversationService:
             return "That's really interesting! Can you tell me more about that?"
 
         base_prompt = FALLBACK_PERSONALITY_PROMPTS.get(
-            personality, FALLBACK_PERSONALITY_PROMPTS["friendly_neutral"]
+            personality, FALLBACK_PERSONALITY_PROMPTS["friendly"]
         )
         history_context = f"\n\nRecent conversation:\n{conversation_history}" if conversation_history else ""
 

@@ -75,7 +75,7 @@ async def conversation(
             user_id=str(current_user.id),
             conversation_id=conversation_id,
             conversation_history=None,  # Enhanced service handles its own conversation history via SessionStateService
-            personality=request.personality or "friendly_neutral",
+            personality=request.personality or "friendly",
             fresh_events=fresh_events  # Pass fresh events to avoid repetition
         )
 
@@ -239,7 +239,7 @@ async def stream_conversation(
             user_id=str(current_user.id),
             conversation_id=conversation_id,
             conversation_history=None,  # Enhanced service handles via SessionStateService
-            personality=request.personality or "friendly_neutral",
+            personality=request.personality or "friendly",
             fresh_events=fresh_events,
             stream=True  # Enable SSE streaming
         )
