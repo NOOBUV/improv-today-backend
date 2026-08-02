@@ -1,9 +1,20 @@
 """
 Tests for ClaraConversationService - Story 2.6 Enhanced Conversational Context Integration
 """
+import json
+
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from app.services.clara_conversation_service import ClaraConversationService
+from app.services.state_influence_service import ConversationScenario
+
+
+def _completion(content):
+    """Stand-in for a non-streaming OpenAI/Gemini completion."""
+    c = Mock()
+    c.choices = [Mock()]
+    c.choices[0].message.content = content
+    return c
 
 
 class TestClaraConversationService:
@@ -11,40 +22,47 @@ class TestClaraConversationService:
 
     @pytest.fixture
     def mock_services(self):
-        """Mock all dependent services."""
+        """Mock every constructor dependency - no DB, no network."""
         mocks = {
-            'character_content_service': Mock(),
+            'character_content_service': Mock(select_relevant_content=AsyncMock()),
             'conversation_prompt_service': Mock(),
-            'state_influence_service': Mock(),
-            'state_manager_service': Mock(),
-            'openai_client': Mock()
+            'state_influence_service': Mock(build_conversation_context=AsyncMock(return_value={})),
+            'state_manager_service': Mock(get_current_global_state=AsyncMock(return_value={})),
+            'session_state_service': Mock(
+                add_conversation_message=AsyncMock(),
+                get_conversation_history=AsyncMock(return_value=""),
+            ),
+            'event_selection_service': Mock(
+                get_contextual_events=AsyncMock(return_value=[]),
+                track_events_mentioned_in_response=AsyncMock(),
+            ),
+            'openai_client': Mock(),
         }
 
-        # Setup async methods
-        mocks['character_content_service'].select_relevant_content = AsyncMock()
-        mocks['state_influence_service'].build_conversation_context = AsyncMock()
-        mocks['state_manager_service'].get_current_global_state = AsyncMock()
-        mocks['state_manager_service'].get_recent_events = AsyncMock()
         # The service awaits client.chat.completions.create(...) - plain Mock isn't awaitable
-        mocks['openai_client'].chat.completions.create = AsyncMock()
+        mocks['openai_client'].chat.completions.create = AsyncMock(return_value=_completion("Response"))
+
+        # Prompt service is sync; both calls unpack/format their return value
+        mocks['conversation_prompt_service'].select_conversation_emotion_with_mood.return_value = (
+            Mock(value="neutral"), "neutral baseline"
+        )
+        mocks['conversation_prompt_service'].construct_conversation_prompt_with_mood.return_value = "PROMPT"
 
         return mocks
 
     @pytest.fixture
     def service(self, mock_services):
         """Create ClaraConversationService with mocked dependencies."""
-        with patch('app.services.clara_conversation_service.CharacterContentService') as mock_backstory, \
-             patch('app.services.clara_conversation_service.ConversationPromptService') as mock_prompt, \
-             patch('app.services.clara_conversation_service.StateInfluenceService') as mock_influence, \
-             patch('app.services.clara_conversation_service.StateManagerService') as mock_state, \
-             patch('app.services.clara_conversation_service.AsyncOpenAI') as mock_openai:
-
-            mock_backstory.return_value = mock_services['character_content_service']
-            mock_prompt.return_value = mock_services['conversation_prompt_service']
-            mock_influence.return_value = mock_services['state_influence_service']
-            mock_state.return_value = mock_services['state_manager_service']
-            mock_openai.return_value = mock_services['openai_client']
-
+        with patch.multiple(
+            'app.services.clara_conversation_service',
+            CharacterContentService=Mock(return_value=mock_services['character_content_service']),
+            ConversationPromptService=Mock(return_value=mock_services['conversation_prompt_service']),
+            StateInfluenceService=Mock(return_value=mock_services['state_influence_service']),
+            StateManagerService=Mock(return_value=mock_services['state_manager_service']),
+            SessionStateService=Mock(return_value=mock_services['session_state_service']),
+            EventSelectionService=Mock(return_value=mock_services['event_selection_service']),
+            AsyncOpenAI=Mock(return_value=mock_services['openai_client']),
+        ):
             service = ClaraConversationService()
             return service, mock_services
 
@@ -58,7 +76,7 @@ class TestClaraConversationService:
             "mood": {"numeric_value": 70},
             "stress": {"numeric_value": 40}
         }
-        mocks['state_manager_service'].get_recent_events.return_value = [
+        mocks['event_selection_service'].get_contextual_events.return_value = [
             {
                 "event_id": "event1",
                 "summary": "Had a good meeting",
@@ -72,20 +90,22 @@ class TestClaraConversationService:
             "estimated_tokens": 125
         }
         mocks['state_influence_service'].build_conversation_context.return_value = {
-            "mood_influence": {"tone": "positive"}
+            "mood_transition": {
+                "blended_mood_score": 72,
+                "mood_context": {"current_mood": 70, "stress_level": 40},
+            }
         }
 
-        # Mock OpenAI response
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "AI response based on context"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        # Mock prompt construction
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
+        # The model replies with the {"message", "emotion"} JSON contract
+        mocks['openai_client'].chat.completions.create.return_value = _completion(
+            json.dumps({"message": "AI response based on context", "emotion": "happy"})
+        )
+        mocks['conversation_prompt_service'].select_conversation_emotion_with_mood.return_value = (
             Mock(value="happy"), "User seems positive"
         )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Enhanced prompt"
+
+        # If the enhanced path silently degrades, this would be awaited instead
+        enhanced_service._fallback_response = AsyncMock(return_value="Fallback response")
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="How are you feeling today?",
@@ -93,11 +113,21 @@ class TestClaraConversationService:
             conversation_id="conv456"
         )
 
-        assert result["ai_response"] == "AI response based on context"
-        assert result["enhanced_mode"] == True
-        assert result["fallback_mode"] == False
-        assert "performance_metrics" in result
-        assert "simulation_context" in result
+        assert result["ai_response"] == "AI response based on context"  # unwrapped from the JSON
+        assert result["enhanced_mode"] is True
+        assert result["fallback_mode"] is False
+        assert result["simulation_context"]["conversation_emotion"] == "happy"
+        assert result["simulation_context"]["recent_events_count"] == 1
+        assert result["correlation_id"] == result["performance_metrics"]["correlation_id"]
+
+        enhanced_service._fallback_response.assert_not_awaited()
+        assert "fallback_response" not in result["performance_metrics"]["sub_operations"]
+
+        # The enhanced turn is persisted as enhanced, not as a degraded one
+        stored = mocks['session_state_service'].add_conversation_message.await_args_list[-1].kwargs
+        assert stored["message_type"] == "assistant"
+        assert stored["message_content"] == "AI response based on context"
+        assert stored["metadata"]["enhanced_mode"] is True
 
     @pytest.mark.asyncio
     async def test_fallback_to_inline_response(self, service):
@@ -123,40 +153,25 @@ class TestClaraConversationService:
 
     @pytest.mark.asyncio
     async def test_performance_timing_metrics(self, service):
-        """Test that performance timing metrics are captured."""
+        """The monitor must record the real pipeline breakdown, not just a total.
+
+        Pins what conversation_performance.py emits: correlation id, operation
+        name, and a sub_operations map whose durations track actual elapsed time.
+        """
         enhanced_service, mocks = service
 
-        # Setup mock responses with slight delays
         async def delayed_global_state():
             import asyncio
-            await asyncio.sleep(0.01)  # 10ms delay
+            await asyncio.sleep(0.02)  # 20ms delay - must show up in the breakdown
             return {"mood": {"numeric_value": 60}}
 
-        async def delayed_events(**kwargs):
-            import asyncio
-            await asyncio.sleep(0.01)  # 10ms delay
-            return []
-
         mocks['state_manager_service'].get_current_global_state.side_effect = delayed_global_state
-        mocks['state_manager_service'].get_recent_events.side_effect = delayed_events
         mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": ["character_gist"],
             "char_count": 100,
             "estimated_tokens": 25
         }
-        mocks['state_influence_service'].build_conversation_context.return_value = {}
-
-        # Setup OpenAI mock
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Response"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
-            Mock(value="neutral"), "Neutral emotion"
-        )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="Test message",
@@ -165,101 +180,84 @@ class TestClaraConversationService:
         )
 
         metrics = result["performance_metrics"]
-        assert "context_gathering_ms" in metrics
-        assert "response_generation_ms" in metrics
-        assert "total_response_time_ms" in metrics
-        assert metrics["context_gathering_ms"] > 0
-        assert metrics["total_response_time_ms"] > 0
+        assert metrics["operation"] == "enhanced_conversation_response"
+        assert metrics["correlation_id"].startswith("conv_user123_conv456_")
+        assert metrics["start_timestamp"] < metrics["end_timestamp"]
 
-    @pytest.mark.skip(reason="Timing-dependent test - hard to predict in CI")
-    @pytest.mark.asyncio
-    async def test_context_gathering_timeout_warning(self, service):
-        """Test warning when context gathering exceeds threshold."""
-        enhanced_service, mocks = service
-        enhanced_service.config.MAX_CONTEXT_PROCESSING_MS = 1  # Very low threshold
+        steps = metrics["sub_operations"]
+        # Every stage of the enhanced path, including the nested prompt/API steps
+        assert {
+            "request_parsing", "context_gathering", "global_state_retrieval",
+            "event_selection", "backstory_selection", "state_influence_calculation",
+            "context_extraction", "emotion_selection", "prompt_construction",
+            "openai_api_call", "response_parsing", "consciousness_generation",
+            "response_formatting",
+        } <= steps.keys(), sorted(steps)
 
-        # Setup mock responses
-        mocks['state_manager_service'].get_current_global_state.return_value = {}
-        mocks['state_manager_service'].get_recent_events.return_value = []
-        mocks['character_content_service'].select_relevant_content.return_value = {
-            "content": "Content",
-            "content_types": [],
-            "char_count": 0,
-            "estimated_tokens": 0
-        }
-        mocks['state_influence_service'].build_conversation_context.return_value = {}
+        # Durations are measured, not stubbed: the injected 20ms sleep is visible
+        # and rolls up into the parent step and the total.
+        assert steps["global_state_retrieval"]["duration_ms"] >= 20
+        assert steps["context_gathering"]["duration_ms"] >= steps["global_state_retrieval"]["duration_ms"]
+        assert metrics["total_duration_ms"] >= steps["context_gathering"]["duration_ms"] > 0
 
-        # Mock OpenAI response
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Response"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
-            Mock(value="neutral"), "Neutral"
-        )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
-
-        # This should log a warning about exceeding threshold
-        with patch('app.services.clara_conversation_service.logger') as mock_logger:
-            result = await enhanced_service.generate_enhanced_response(
-                user_message="Test",
-                user_id="user123",
-                conversation_id="conv456"
-            )
-
-            # Should have logged a warning about context gathering time
-            mock_logger.warning.assert_called()
-            warning_calls = [call for call in mock_logger.warning.call_args_list
-                           if "Context gathering took" in str(call)]
-            assert len(warning_calls) > 0
+        # Step metadata the service stashes via s.update(...)
+        assert steps["backstory_selection"]["chars_selected"] == 100
+        assert steps["openai_api_call"]["max_tokens"] == 400
 
     @pytest.mark.asyncio
     async def test_simulation_context_integration(self, service):
-        """Test that simulation context is properly integrated."""
+        """The gathered context must actually reach the prompt and the response.
+
+        Events are unwrapped from the selection service's envelope, mood/stress
+        come from the state influence service's mood_transition block.
+        """
         enhanced_service, mocks = service
 
-        # Setup comprehensive simulation context
-        mocks['state_manager_service'].get_current_global_state.return_value = {
+        global_state = {
             "mood": {"numeric_value": 85},
             "stress": {"numeric_value": 30},
             "energy": {"numeric_value": 75}
         }
-        mocks['state_manager_service'].get_recent_events.return_value = [
+        mocks['state_manager_service'].get_current_global_state.return_value = global_state
+        mocks['event_selection_service'].get_contextual_events.return_value = [
             {
                 "event_id": "event1",
                 "summary": "Completed an important project",
                 "hours_ago": 1,
                 "impact_mood": "positive"
             },
+            # Wrapped form: the service must unwrap "original_event"
             {
-                "event_id": "event2",
-                "summary": "Had lunch with a friend",
-                "hours_ago": 3,
-                "impact_mood": "positive"
+                "id": "event2",
+                "original_event": {
+                    "event_id": "event2",
+                    "summary": "Had lunch with a friend",
+                    "hours_ago": 3,
+                    "impact_mood": "positive"
+                }
             }
         ]
         mocks['character_content_service'].select_relevant_content.return_value = {
-            "content": "Ava loves creative projects and collaboration",
+            "content": "Clara loves creative projects and collaboration",
             "content_types": ["positive_memories", "character_gist"],
             "char_count": 800,
             "estimated_tokens": 200
         }
         mocks['state_influence_service'].build_conversation_context.return_value = {
-            "mood_influence": {"tone": "upbeat", "energy_level": "high"},
-            "overall_tone": "enthusiastic"
+            "mood_transition": {
+                "blended_mood_score": 82,
+                "mood_context": {"current_mood": 85, "stress_level": 30},
+            },
+            "overall_tone": "enthusiastic",
         }
 
-        # Setup OpenAI mock
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "I'm feeling great! Just finished a big project."
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
+        # Plain (non-JSON) reply: emotion falls back to the selected one
+        mocks['openai_client'].chat.completions.create.return_value = _completion(
+            "I'm feeling great! Just finished a big project."
+        )
+        mocks['conversation_prompt_service'].select_conversation_emotion_with_mood.return_value = (
             Mock(value="excited"), "High energy and positive mood"
         )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Enhanced prompt with context"
 
         result = await enhanced_service.generate_enhanced_response(
             user_message="How has your day been?",
@@ -273,6 +271,18 @@ class TestClaraConversationService:
         assert simulation_context["stress_level"] == 30
         assert "positive_memories" in simulation_context["selected_content_types"]
         assert simulation_context["conversation_emotion"] == "excited"
+
+        # The context is not just reported back - it is what the prompt was built from
+        prompt_kwargs = mocks['conversation_prompt_service'].construct_conversation_prompt_with_mood.call_args.kwargs
+        assert [e["summary"] for e in prompt_kwargs["recent_events"]] == [
+            "Completed an important project", "Had lunch with a friend"
+        ]
+        assert prompt_kwargs["global_state"] == global_state
+        assert prompt_kwargs["character_backstory"] == "Clara loves creative projects and collaboration"
+        assert prompt_kwargs["mood_transition_data"]["blended_mood_score"] == 82
+
+        emotion_kwargs = mocks['conversation_prompt_service'].select_conversation_emotion_with_mood.call_args.kwargs
+        assert emotion_kwargs["blended_mood_score"] == 82
 
     @pytest.mark.asyncio
     async def test_error_recovery(self, service):
@@ -313,8 +323,8 @@ class TestClaraConversationService:
         }
 
         # Setup mocks
-        mocks['state_manager_service'].get_current_global_state.return_value = {}
-        mocks['state_manager_service'].get_recent_events.return_value = []
+        events = [{"event_id": "event1", "summary": "Shipped the redesign", "hours_ago": 2}]
+        mocks['event_selection_service'].get_contextual_events.return_value = events
         mocks['character_content_service'].select_relevant_content.return_value = {
             "content": "Content",
             "content_types": [],
@@ -322,34 +332,22 @@ class TestClaraConversationService:
             "estimated_tokens": 25
         }
 
-        # Mock that should receive user preferences
-        mocks['state_influence_service'].build_conversation_context.return_value = {}
-
-        # Setup OpenAI mock
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Response"
-        mocks['openai_client'].chat.completions.create.return_value = mock_response
-
-        mocks['conversation_prompt_service'].determine_emotion_from_context.return_value = (
-            Mock(value="neutral"), "Neutral"
-        )
-        mocks['conversation_prompt_service'].construct_conversation_prompt.return_value = "Prompt"
-
-        result = await enhanced_service.generate_enhanced_response(
-            user_message="Test message",
+        await enhanced_service.generate_enhanced_response(
+            user_message="Work has been great and fun lately",
             user_id="user123",
             conversation_id="conv456",
             user_preferences=user_preferences
         )
 
-        # Verify user preferences were passed to state influence service
-        mocks['state_influence_service'].build_conversation_context.assert_called_with(
-            user_id="user123",
-            conversation_id="conv456",
-            scenario=mocks['state_influence_service'].build_conversation_context.call_args[1]["scenario"],
-            user_preferences=user_preferences
-        )
+        # Everything the state influence service needs must reach it
+        kwargs = mocks['state_influence_service'].build_conversation_context.call_args.kwargs
+        assert kwargs["user_id"] == "user123"
+        assert kwargs["conversation_id"] == "conv456"
+        assert kwargs["scenario"] is ConversationScenario.CASUAL_CHAT
+        assert kwargs["user_preferences"] == user_preferences
+        assert kwargs["recent_events"] == events
+        # Sentiment is computed from the message, not hardcoded (this one is positive)
+        assert kwargs["conversation_sentiment"] > 0
 
 
 class TestAwaitRegression:
