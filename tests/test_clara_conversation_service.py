@@ -25,6 +25,8 @@ class TestClaraConversationService:
         mocks['state_influence_service'].build_conversation_context = AsyncMock()
         mocks['state_manager_service'].get_current_global_state = AsyncMock()
         mocks['state_manager_service'].get_recent_events = AsyncMock()
+        # The service awaits client.chat.completions.create(...) - plain Mock isn't awaitable
+        mocks['openai_client'].chat.completions.create = AsyncMock()
 
         return mocks
 
