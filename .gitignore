@@ -51,3 +51,7 @@ htmlcov/
 .coverage
 .pytest_cache/
 
+
+# Kokoro voice server (local, host-side)
+voice/models/
+voice/.venv/
