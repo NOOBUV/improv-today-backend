@@ -7,7 +7,7 @@ import asyncio
 import time
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
 from app.services.conversation_performance import ConversationPerformanceMonitor
-from app.services.clara_conversation_service import ClaraConversationService
+from app.services.clara_conversation_service import CLARA_MAX_TOKENS, CLARA_MODEL, ClaraConversationService
 
 
 class TestConversationPerformanceMonitor:
@@ -345,8 +345,8 @@ class TestClaraConversationServicePerformance:
         # Verify OpenAI was called with proper parameters
         mock_dependencies['openai_client'].chat.completions.create.assert_called_once()
         call_args = mock_dependencies['openai_client'].chat.completions.create.call_args[1]
-        assert call_args['model'] == "gpt-4o-mini"
-        assert call_args['max_tokens'] == 400
+        assert call_args['model'] == CLARA_MODEL
+        assert call_args['max_tokens'] == CLARA_MAX_TOKENS
         assert call_args['temperature'] == 0.7
 
     def test_performance_thresholds_configuration(self, conversation_service):

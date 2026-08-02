@@ -5,7 +5,7 @@ import json
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from app.services.clara_conversation_service import ClaraConversationService
+from app.services.clara_conversation_service import CLARA_MAX_TOKENS, ClaraConversationService
 from app.services.state_influence_service import ConversationScenario
 
 
@@ -202,7 +202,7 @@ class TestClaraConversationService:
 
         # Step metadata the service stashes via s.update(...)
         assert steps["backstory_selection"]["chars_selected"] == 100
-        assert steps["openai_api_call"]["max_tokens"] == 400
+        assert steps["openai_api_call"]["max_tokens"] == CLARA_MAX_TOKENS
 
     @pytest.mark.asyncio
     async def test_simulation_context_integration(self, service):

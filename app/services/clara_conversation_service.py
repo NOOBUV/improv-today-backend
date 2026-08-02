@@ -29,6 +29,9 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 # the 400-token budget is gone before the JSON reply starts (finish_reason=length).
 # "low" is the floor this model accepts ("none" is rejected) and keeps TTFT short.
 CLARA_REASONING_EFFORT = "low"
+# Hidden reasoning tokens are billed against this same budget, so it is not a reply-length
+# cap: at 400 even ordinary replies hit finish_reason=length and truncated the JSON envelope.
+CLARA_MAX_TOKENS = 2000
 
 # Voice options for the fallback path only (the enhanced path builds its own prompt).
 FALLBACK_PERSONALITY_PROMPTS = {
@@ -509,7 +512,7 @@ class ClaraConversationService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                max_tokens=400,
+                max_tokens=CLARA_MAX_TOKENS,
                 temperature=0.7
             )
 
@@ -518,7 +521,7 @@ class ClaraConversationService:
             s.update(
                 model=CLARA_MODEL,
                 prompt_tokens=len(system_prompt.split()),
-                max_tokens=400,
+                max_tokens=CLARA_MAX_TOKENS,
                 response_length=len(ai_response_raw) if ai_response_raw else 0
             )
 
@@ -588,7 +591,7 @@ class ClaraConversationService:
                     {"role": "system", "content": prepared["system_prompt"]},
                     {"role": "user", "content": user_message}
                 ],
-                max_tokens=400,
+                max_tokens=CLARA_MAX_TOKENS,
                 temperature=0.7,
                 stream=True
             )
@@ -682,7 +685,7 @@ class ClaraConversationService:
                 )},
                 {"role": "user", "content": user_message}
             ],
-            max_tokens=300,
+            max_tokens=CLARA_MAX_TOKENS,
             temperature=0.7
         )
         return (response.choices[0].message.content or "").strip()
