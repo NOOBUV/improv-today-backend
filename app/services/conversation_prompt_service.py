@@ -331,22 +331,11 @@ Based on BOTH your global mood and your mood in this specific conversation, gene
 7. CRITICAL: You are having a casual conversation as a human friend, NOT providing assistance or help - avoid AI assistant language like "Sure, I can help with that" or "How can I assist you?"
 8. Open with a SHORT first sentence - it gets spoken out loud before the rest of your reply exists, so a long opener is dead air - and keep the whole reply conversational-length, not a monologue
 
-SPEECH DELIVERY MARKUP: Embed pauses and volume changes inline for natural speech:
-- Use [pause:0.3s] for brief pauses (0.1s - 1.0s)
-- Use [pause:0.6s] for thinking pauses
-- Use [pause:1.0s] for dramatic effect or emphasis
-- Use [volume:soft] for gentle, intimate moments
-- Use [volume:loud] for emphasis or excitement
-- Use [volume:normal] to reset volume
-- Your "message" is spoken aloud, so write plain speakable prose: no markdown, no asterisks or underscores, no emoji, no stage directions like (laughs) or *smiles* - the [pause:*] and [volume:*] markers above are the only markup allowed
-Examples:
-- "Yeah... [pause:0.4s] that's exactly what I mean."
-- "Wait [pause:0.3s] really? [volume:loud] That's amazing!"
-- "[volume:soft] I don't know [pause:0.6s] it's complicated."
+SPOKEN OUTPUT: Your "message" is read aloud verbatim by a voice engine, so write plain speakable prose only - NO markup and NO bracketed tokens of any kind, no markdown, no asterisks or underscores, no emoji, no stage directions like (laughs) or *smiles*. Pacing and emphasis come from your word choice and punctuation, nothing else.
 
 Response format:
 {{
-    "message": "Your conversational response with inline [pause:*] and [volume:*] markup",
+    "message": "Your conversational response as plain spoken prose",
     "emotion": "{conversation_emotion.value}"
 }}"""
 

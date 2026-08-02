@@ -12,6 +12,8 @@ commit 0b50e84).
 
 Re-captured 2026-08-02: voice-pipeline prompt guidance added (STT-transcript
 tolerance, speakable TTS-safe "message" output, short lead sentence).
+
+Re-captured 2026-08-02 (2): speech-markup system removed — plain prose only.
 """
 import hashlib
 
@@ -53,7 +55,7 @@ USER_MESSAGE = "How did the pitch go?"
 
 STRATEGIES = ["fresh_events_rotation", "specific_person_focus", "current_day_events"]
 
-GOLDEN_SHA256 = "0ff181863daf7c8fd1f49e050f1950cf2200753f9e09a939d275e8f41e96cadc"
+GOLDEN_SHA256 = "d39f4848e609cdf069e2464472649f92b5b6756f2fb13c99d835381309d4bcad"
 
 
 @pytest.fixture
