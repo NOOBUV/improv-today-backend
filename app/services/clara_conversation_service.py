@@ -22,8 +22,8 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 # Gemini speaks OpenAI's wire protocol, so the AsyncOpenAI client stays.
-# ponytail: newest flash-class model this key can reach (2.5-flash is closed to new keys).
-CLARA_MODEL = "gemini-3.6-flash"
+# ponytail: flash-lite over flash for the free-tier limits (15 RPM/500 RPD vs 5 RPM/20 RPD).
+CLARA_MODEL = "gemini-3.1-flash-lite"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 # Gemini 3 thinks by default and its reasoning eats max_tokens: at the default effort
 # the 400-token budget is gone before the JSON reply starts (finish_reason=length).
