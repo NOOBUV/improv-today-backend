@@ -5,14 +5,69 @@ Manages session state storage with Redis and provides session lifecycle manageme
 
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
+
+from pydantic import BaseModel
 
 from app.services.redis_service import RedisService
 from app.services.simulation.state_manager import StateManagerService
 
 logger = logging.getLogger(__name__)
+
+# ponytail: hand-rolled stopword list beats pulling in nltk for one ILIKE query
+_STOPWORDS = {
+    "about", "actually", "after", "again", "already", "also", "always", "another",
+    "anything", "around", "because", "been", "before", "being", "better", "could",
+    "didn", "does", "doing", "done", "down", "even", "ever", "every", "from",
+    "gonna", "good", "have", "havent", "hear", "here", "into", "just", "keep",
+    "kind", "know", "like", "little", "look", "made", "make", "many", "maybe",
+    "mean", "might", "more", "most", "much", "must", "need", "never", "next",
+    "nice", "only", "other", "over", "people", "pretty", "really", "right",
+    "said", "same", "should", "since", "some", "something", "still", "such",
+    "sure", "take", "talk", "tell", "than", "that", "their", "them", "then",
+    "there", "these", "they", "thing", "things", "think", "this", "those",
+    "though", "time", "today", "told", "took", "very", "want", "well", "went",
+    "were", "what", "when", "where", "which", "while", "with", "would", "your",
+    "yeah", "your", "youre", "remember", "guess", "stuff", "back", "come",
+    "came", "give", "getting", "goes", "going",
+}
+
+_SNIPPET_CHARS = 200
+
+
+class PastSnippet(BaseModel):
+    """One recalled line from an earlier conversation."""
+    role: str  # "user" | "assistant"
+    content: str
+    age: str  # human phrasing, e.g. "yesterday", "3 days ago"
+
+
+def _humanize_age(created_at: datetime) -> str:
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - created_at).days
+    if days <= 0:
+        return "earlier today"
+    if days == 1:
+        return "yesterday"
+    if days < 14:
+        return f"{days} days ago"
+    if days < 60:
+        return f"{days // 7} weeks ago"
+    return f"{days // 30} months ago"
+
+
+def _keywords(message: str, limit: int = 6) -> List[str]:
+    """Meaningful, de-duplicated words from the incoming message."""
+    seen: List[str] = []
+    for word in re.findall(r"[a-z']{4,}", message.lower()):
+        word = word.strip("'")
+        if len(word) >= 4 and word not in _STOPWORDS and word not in seen:
+            seen.append(word)
+    return seen[:limit]
 
 
 class SessionStateService:
@@ -328,6 +383,65 @@ class SessionStateService:
                 await session.commit()
         except Exception as e:
             logger.warning(f"conversation_log write failed (turn unaffected): {e}")
+
+    async def get_related_past_snippets(
+        self,
+        user_id: str,
+        user_message: str,
+        exclude_conversation_id: str,
+        limit: int = 3
+    ) -> List[PastSnippet]:
+        """
+        Associative recall: lines from OTHER conversations that share keywords with
+        the incoming message, most-matching first, then most recent.
+
+        ponytail: ILIKE keyword overlap, no embeddings. Swap in pg_trgm/tsvector or
+        a vector index if recall quality becomes the bottleneck.
+
+        Best-effort: any failure returns [] so the turn proceeds without memories.
+        """
+        words = _keywords(user_message)
+        if not words:
+            return []
+
+        try:
+            from sqlalchemy import select, or_, case, desc
+            from app.core.database import AsyncSessionLocal
+            from app.models.conversation_log import ConversationLog
+
+            matches = [ConversationLog.content.ilike(f"%{w}%") for w in words]
+            score = sum(case((m, 1), else_=0) for m in matches)
+
+            stmt = (
+                select(ConversationLog, score.label("score"))
+                .where(
+                    ConversationLog.user_id == str(user_id),
+                    ConversationLog.conversation_id != str(exclude_conversation_id),
+                    or_(*matches),
+                )
+                .order_by(desc("score"), desc(ConversationLog.created_at))
+                .limit(limit)
+            )
+
+            async with AsyncSessionLocal() as session:
+                rows = (await session.execute(stmt)).all()
+
+            return [
+                PastSnippet(
+                    role=row[0].role,
+                    content=(
+                        row[0].content[:_SNIPPET_CHARS].rstrip() + "..."
+                        if len(row[0].content) > _SNIPPET_CHARS
+                        else row[0].content
+                    ),
+                    age=_humanize_age(row[0].created_at),
+                )
+                for row in rows
+            ]
+
+        except Exception as e:
+            logger.warning(f"Past-conversation recall failed (turn unaffected): {e}")
+            return []
 
     async def get_conversation_history(
         self,

@@ -31,6 +31,7 @@ class TestClaraConversationService:
             'session_state_service': Mock(
                 add_conversation_message=AsyncMock(),
                 get_conversation_history=AsyncMock(return_value=""),
+                get_related_past_snippets=AsyncMock(return_value=[]),
             ),
             'event_selection_service': Mock(
                 get_contextual_events=AsyncMock(return_value=[]),
@@ -378,6 +379,7 @@ class TestAwaitRegression:
             'session_state_service': Mock(
                 add_conversation_message=AsyncMock(),
                 get_conversation_history=AsyncMock(return_value=[]),
+                get_related_past_snippets=AsyncMock(return_value=[]),
             ),
             'event_selection_service': Mock(
                 get_contextual_events=AsyncMock(return_value=[

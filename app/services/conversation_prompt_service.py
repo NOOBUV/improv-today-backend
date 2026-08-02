@@ -252,7 +252,8 @@ When responding as {emotion.value}, use this linguistic pattern:
         conversation_history: Optional[str] = None,
         recent_events: Optional[List[Dict[str, Any]]] = None,
         global_state: Optional[Dict[str, Any]] = None,
-        content_metadata: Optional[Dict[str, Any]] = None
+        content_metadata: Optional[Dict[str, Any]] = None,
+        past_memories: Optional[List[Any]] = None
     ) -> str:
         """
         Construct conversation prompt with enhanced mood transition data.
@@ -266,6 +267,7 @@ When responding as {emotion.value}, use this linguistic pattern:
             recent_events: Simulation events to append as a context section
             global_state: Global state traits to append as a context section
             content_metadata: Content selection metadata steering the section wording
+            past_memories: Snippets recalled from earlier conversations (role/content/age)
 
         Returns:
             Enhanced prompt with mood transition context and simulation context section.
@@ -308,6 +310,8 @@ When responding as {emotion.value}, use this linguistic pattern:
         if conversation_history:
             history_context = f"\n\nRecent conversation context:\n{conversation_history}\n"
 
+        memory_context = self._build_memory_section(past_memories)
+
         # Construct the full prompt with mood transition awareness
         prompt = f"""You are Clara, a 22-year-old creative strategist with the following background:
 
@@ -323,7 +327,7 @@ However, in your current conversation with this user, {conversation_context}.
 
 {self.NATURAL_CONVERSATION_PATTERNS}
 
-{history_context}
+{history_context}{memory_context}
 
 VOICE INPUT REALITY: The user's message is a live speech-to-text transcript, so it can contain homophones, mangled names, missing punctuation, or dropped words. Infer what they actually meant and respond to that - never comment on, correct, or joke about the odd wording.
 
@@ -356,6 +360,26 @@ Response format:
 
         return prompt + self._build_simulation_context_section(
             recent_events or [], global_state or {}, content_metadata
+        )
+
+    def _build_memory_section(self, past_memories: Optional[List[Any]]) -> str:
+        """Compact callback section from earlier conversations. Empty when nothing matched."""
+        if not past_memories:
+            return ""
+
+        lines = []
+        for m in past_memories:
+            role = getattr(m, "role", None) or m.get("role")
+            content = getattr(m, "content", None) or m.get("content")
+            age = getattr(m, "age", None) or m.get("age")
+            speaker = "they said" if role == "user" else "you told them"
+            lines.append(f'- {age}, {speaker}: "{content}"')
+
+        return (
+            "\n\nTHINGS YOU REMEMBER FROM PAST CONVERSATIONS:\n"
+            + "\n".join(lines)
+            + "\nBring one of these up only if it genuinely fits what they just said - "
+            "not every turn, and never recited back as a list or quoted word for word.\n"
         )
 
     def _build_simulation_context_section(

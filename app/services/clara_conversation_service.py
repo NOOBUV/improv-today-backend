@@ -18,7 +18,7 @@ from app.services.simulation.state_manager import StateManagerService
 from app.services.session_state_service import SessionStateService
 from app.services.event_selection_service import EventSelectionService
 from app.core.config import settings
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,24 @@ class ClaraConversationService:
         self.session_state_service = SessionStateService()
         self.event_selection_service = EventSelectionService()
         self.openai_client = AsyncOpenAI(api_key=settings.gemini_api_key, base_url=GEMINI_BASE_URL) if settings.gemini_api_key else None
+        self.vedastro_client = AsyncOpenAI(api_key=settings.vedastro_gemini_api_key, base_url=GEMINI_BASE_URL) if settings.vedastro_gemini_api_key else None
         self.performance_monitor = ConversationPerformanceMonitor()
+
+    async def _chat_completion(self, **kwargs):
+        """Every Gemini call goes through here.
+
+        Free tier is 15 requests/min per key, so a 429 gets exactly one retry on the
+        vedastro key. ponytail: one retry, no backoff - if both keys are hot the
+        caller's fallback path is the right answer.
+        """
+        try:
+            return await self.openai_client.chat.completions.create(**kwargs)
+        except Exception as e:
+            rate_limited = isinstance(e, RateLimitError) or getattr(e, "status_code", None) == 429
+            if not rate_limited or self.vedastro_client is None:
+                raise
+            logger.warning("Primary Gemini key rate-limited, falling back to vedastro Gemini key")
+            return await self.vedastro_client.chat.completions.create(**kwargs)
 
     async def generate_enhanced_response(
         self,
@@ -123,10 +140,18 @@ class ClaraConversationService:
                         max_messages=12  # 6 exchanges - enough for Clara to avoid repeating herself
                     )
 
+                # Associative recall from past conversations (best-effort, [] on failure)
+                past_memories = await self.session_state_service.get_related_past_snippets(
+                    user_id=user_id,
+                    user_message=user_message,
+                    exclude_conversation_id=conversation_id
+                )
+
                 s.update(
                     user_message_length=len(user_message),
                     history_retrieved=bool(conversation_history),
-                    fresh_events_provided=len(fresh_events) if fresh_events else 0
+                    fresh_events_provided=len(fresh_events) if fresh_events else 0,
+                    past_memories_recalled=len(past_memories)
                 )
 
             # Sub-operation 2: Context gathering with detailed breakdown
@@ -163,7 +188,8 @@ class ClaraConversationService:
                             simulation_context=simulation_context,
                             conversation_history=conversation_history,
                             timing_context=timing_context,
-                            correlation_id=correlation_id
+                            correlation_id=correlation_id,
+                            past_memories=past_memories
                         )
 
                     with self.performance_monitor.step(timing_context, "consciousness_generation") as s:
@@ -172,7 +198,8 @@ class ClaraConversationService:
                             user_message=user_message,
                             simulation_context=simulation_context,
                             conversation_history=conversation_history,
-                            timing_context=timing_context
+                            timing_context=timing_context,
+                            past_memories=past_memories
                         )
 
                         s.update(
@@ -374,7 +401,8 @@ class ClaraConversationService:
         user_message: str,
         simulation_context: Dict[str, Any],
         conversation_history: Optional[str] = None,
-        timing_context: Optional[Dict[str, Any]] = None
+        timing_context: Optional[Dict[str, Any]] = None,
+        past_memories: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         """Context extraction -> emotion selection -> prompt construction.
 
@@ -421,7 +449,8 @@ class ClaraConversationService:
                 conversation_history=conversation_history,
                 recent_events=recent_events,
                 global_state=global_state,
-                content_metadata=content_metadata
+                content_metadata=content_metadata,
+                past_memories=past_memories
             )
             s.update(
                 prompt_length=len(system_prompt),
@@ -500,16 +529,17 @@ class ClaraConversationService:
         user_message: str,
         simulation_context: Dict[str, Any],
         conversation_history: Optional[str] = None,
-        timing_context: Optional[Dict[str, Any]] = None
+        timing_context: Optional[Dict[str, Any]] = None,
+        past_memories: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         """Non-streaming context-aware response with OpenAI API monitoring."""
         prepared = self._prepare_prompt(
-            user_message, simulation_context, conversation_history, timing_context
+            user_message, simulation_context, conversation_history, timing_context, past_memories
         )
         system_prompt = prepared["system_prompt"]
 
         with self.performance_monitor.step(timing_context, "openai_api_call") as s:
-            response = await self.openai_client.chat.completions.create(
+            response = await self._chat_completion(
                 model=CLARA_MODEL,
                 reasoning_effort=CLARA_REASONING_EFFORT,
                 messages=[
@@ -561,7 +591,8 @@ class ClaraConversationService:
         simulation_context: Dict[str, Any],
         conversation_history: Optional[str] = None,
         timing_context: Optional[Dict[str, Any]] = None,
-        correlation_id: str = None
+        correlation_id: str = None,
+        past_memories: Optional[List[Any]] = None
     ) -> AsyncGenerator[str, None]:
         """Same prep/parse/persist as _respond, assembled as Server-Sent Events.
 
@@ -577,7 +608,7 @@ class ClaraConversationService:
             })
 
             prepared = self._prepare_prompt(
-                user_message, simulation_context, conversation_history, timing_context
+                user_message, simulation_context, conversation_history, timing_context, past_memories
             )
             conversation_emotion = prepared["emotion"]
             recent_events = simulation_context.get("recent_events", [])
@@ -588,7 +619,7 @@ class ClaraConversationService:
             })
 
             # AsyncOpenAI streams without blocking the event loop; chunks go out as they land
-            stream = await self.openai_client.chat.completions.create(
+            stream = await self._chat_completion(
                 model=CLARA_MODEL,
                 reasoning_effort=CLARA_REASONING_EFFORT,
                 messages=[
@@ -674,7 +705,7 @@ class ClaraConversationService:
         )
         history_context = f"\n\nRecent conversation:\n{conversation_history}" if conversation_history else ""
 
-        response = await self.openai_client.chat.completions.create(
+        response = await self._chat_completion(
             model=CLARA_MODEL,
             reasoning_effort=CLARA_REASONING_EFFORT,
             messages=[

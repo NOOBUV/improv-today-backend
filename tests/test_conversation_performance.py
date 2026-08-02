@@ -180,6 +180,7 @@ class TestClaraConversationServicePerformance:
         # Setup mocks
         mock_dependencies['session_state_service'].add_conversation_message = AsyncMock()
         mock_dependencies['session_state_service'].get_conversation_history = AsyncMock(return_value="test history")
+        mock_dependencies['session_state_service'].get_related_past_snippets = AsyncMock(return_value=[])
 
         # Mock context gathering
         conversation_service._gather_simulation_context_with_monitoring = AsyncMock(return_value={
@@ -229,6 +230,7 @@ class TestClaraConversationServicePerformance:
         # Setup mocks for fallback scenario
         mock_dependencies['session_state_service'].add_conversation_message = AsyncMock()
         mock_dependencies['session_state_service'].get_conversation_history = AsyncMock(return_value="")
+        mock_dependencies['session_state_service'].get_related_past_snippets = AsyncMock(return_value=[])
 
         # Mock context gathering failure
         conversation_service._gather_simulation_context_with_monitoring = AsyncMock(side_effect=Exception("Context failed"))

@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -7,6 +8,8 @@ class Settings(BaseSettings):
 
     # Gemini Configuration (Clara's conversation model, via OpenAI-compatible endpoint)
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    # Secondary key, used only when the primary hits a 429
+    vedastro_gemini_api_key: Optional[str] = os.getenv("VEDASTRO_GEMINI_API_KEY") or None
     
     # Supabase Database Configuration
     database_url: str = os.getenv("DATABASE_URL", "")
