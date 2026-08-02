@@ -333,7 +333,7 @@ class SessionStateService:
         self,
         user_id: str,
         conversation_id: str,
-        max_messages: int = 10
+        max_messages: int = 12
     ) -> str:
         """
         Get formatted conversation history for prompt context.

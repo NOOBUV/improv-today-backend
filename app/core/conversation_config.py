@@ -50,7 +50,7 @@ class ConversationContextConfig:
     def from_env(cls) -> 'ConversationContextConfig':
         """Load configuration from environment variables with defaults"""
         return cls(
-            RECENT_EVENTS_HOURS_BACK=int(os.getenv("CONV_RECENT_EVENTS_HOURS", "24")),
+            RECENT_EVENTS_HOURS_BACK=int(os.getenv("CONV_RECENT_EVENTS_HOURS", "72")),
             MAX_EVENTS_COUNT=int(os.getenv("CONV_MAX_EVENTS_COUNT", "5")),
             MAX_BACKSTORY_CHARS=int(os.getenv("CONV_MAX_BACKSTORY_CHARS", "8000")),
             MAX_BACKSTORY_TOKENS=int(os.getenv("CONV_MAX_BACKSTORY_TOKENS", "2000")),

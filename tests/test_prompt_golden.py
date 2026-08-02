@@ -14,6 +14,9 @@ Re-captured 2026-08-02: voice-pipeline prompt guidance added (STT-transcript
 tolerance, speakable TTS-safe "message" output, short lead sentence).
 
 Re-captured 2026-08-02 (2): speech-markup system removed — plain prose only.
+
+Re-captured 2026-08-02 (3): humanization pass — style sections rewritten with
+contrastive BAD/GOOD examples (contractions, length matching, no question every turn).
 """
 import hashlib
 
@@ -55,7 +58,7 @@ USER_MESSAGE = "How did the pitch go?"
 
 STRATEGIES = ["fresh_events_rotation", "specific_person_focus", "current_day_events"]
 
-GOLDEN_SHA256 = "d39f4848e609cdf069e2464472649f92b5b6756f2fb13c99d835381309d4bcad"
+GOLDEN_SHA256 = "891af998001e114eefe52d113a1edf11508d0b2ee0d30bb8b3b59826ce3e107b"
 
 
 @pytest.fixture

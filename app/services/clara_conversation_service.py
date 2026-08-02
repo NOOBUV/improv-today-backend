@@ -3,6 +3,7 @@ Clara Conversation Service: the conversation path behind /api/clara/conversation
 Orchestrates context gathering from simulation, state, and character services.
 """
 import logging
+import os
 from typing import Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime, timezone
 import json
@@ -119,7 +120,7 @@ class ClaraConversationService:
                     conversation_history = await self.session_state_service.get_conversation_history(
                         user_id=user_id,
                         conversation_id=conversation_id,
-                        max_messages=4  # Reduced from 10 to 4 (2 exchanges) for faster TTFT
+                        max_messages=12  # 6 exchanges - enough for Clara to avoid repeating herself
                     )
 
                 s.update(
@@ -427,6 +428,9 @@ class ClaraConversationService:
                 backstory_chars=len(selected_backstory.get("content", "")),
                 events_included=len(recent_events)
             )
+            # ponytail: dev-only full prompt dump, for eyeballing what the model actually got
+            if settings.is_development and os.getenv("CLARA_DEBUG_PROMPT"):
+                logger.warning("=== PROMPT DUMP START ===\n%s\n=== PROMPT DUMP END ===", system_prompt)
 
         return {
             "system_prompt": system_prompt,

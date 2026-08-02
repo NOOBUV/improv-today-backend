@@ -45,8 +45,9 @@ class TestConversationContextConfig:
         with patch.dict(os.environ, {}, clear=True):
             config = ConversationContextConfig.from_env()
 
-            # Should use default values
-            assert config.RECENT_EVENTS_HOURS_BACK == 24
+            # Should use default values (72h: must match the event-selection window,
+            # otherwise day-2/3 events get selected and then silently dropped at render)
+            assert config.RECENT_EVENTS_HOURS_BACK == 72
             assert config.MAX_EVENTS_COUNT == 5
             assert config.MAX_BACKSTORY_CHARS == 8000
 
