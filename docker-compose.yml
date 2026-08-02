@@ -29,9 +29,49 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ENVIRONMENT=development
+      - CLARA_DEBUG_PROMPT=1
       # Redis URL for Celery and simulation engine
       - REDIS_URL=redis://redis:6379/0
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    restart: unless-stopped
+    networks:
+      - clara
+
+  # Celery worker for the simulation + journal queues (see celery_app.py task_routes)
+  worker:
+    build: .
+    depends_on:
+      - redis
+    volumes:
+      - ./:/app
+    env_file:
+      - ./.env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+    # ponytail: concurrency 2 — the Supabase pooler caps us at 15 clients, and the
+    # default (one prefork child per CPU, each with its own SQLAlchemy pool) blows past it.
+    command: ["celery", "-A", "celery_app", "worker", "--loglevel=info", "-Q", "simulation,journal", "--concurrency=2"]
+    restart: unless-stopped
+    networks:
+      - clara
+
+  # Celery beat scheduler (beat_schedule in celery_app.py)
+  beat:
+    build: .
+    depends_on:
+      - redis
+    volumes:
+      - ./:/app
+    env_file:
+      - ./.env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+    # ponytail: schedule db in /tmp so beat state stays out of the bind-mounted repo
+    command: ["celery", "-A", "celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
     restart: unless-stopped
     networks:
       - clara

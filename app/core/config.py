@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        # ponytail: .env carries vars read via os.getenv (e.g. CLARA_DEBUG_PROMPT) that
+        # aren't Settings fields; forbidding them crashes any process started with env_file.
+        extra = "ignore"
 
 settings = Settings()
 
