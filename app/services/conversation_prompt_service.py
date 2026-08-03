@@ -372,6 +372,11 @@ Response format:
             role = getattr(m, "role", None) or m.get("role")
             content = getattr(m, "content", None) or m.get("content")
             age = getattr(m, "age", None) or m.get("age")
+            if role == "memory":
+                # Distilled overnight, not something either of them actually said,
+                # so it gets no timestamp and no quotation marks.
+                lines.append(f"- you remember: {content}")
+                continue
             speaker = "they said" if role == "user" else "you told them"
             lines.append(f'- {age}, {speaker}: "{content}"')
 

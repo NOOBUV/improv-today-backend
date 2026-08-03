@@ -37,6 +37,9 @@ celery_app.conf.update(
         "app.services.simulation.event_generator.*": {"queue": "simulation"},
         "app.services.simulation.state_manager.*": {"queue": "simulation"},
         "journal.*": {"queue": "journal"},
+        # ponytail: rides the journal queue rather than earning its own worker —
+        # both are once-a-night, single-LLM-call jobs.
+        "memory.*": {"queue": "journal"},
     },
 
     # Beat schedule for periodic tasks
@@ -54,6 +57,12 @@ celery_app.conf.update(
         "generate-daily-journal": {
             "task": "journal.generate_daily_entry",
             "schedule": crontab(hour=23, minute=0),  # 11 PM London time (configured above)
+            "options": {"queue": "journal"},
+        },
+        "consolidate-daily-memories": {
+            "task": "memory.consolidate_daily",
+            # Quiet hour, and safely after the 23:00 journal run has finished.
+            "schedule": crontab(hour=4, minute=30),
             "options": {"queue": "journal"},
         },
         "cleanup-journal-logs": {
@@ -87,6 +96,7 @@ try:
     from app.services.simulation import event_generator
     from app.services.simulation import state_manager
     from app.services.journal import tasks
+    from app.services import memory_consolidation
 except ImportError:
     # Tasks not yet implemented, will be available after implementation
     pass

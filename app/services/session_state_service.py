@@ -3,6 +3,7 @@ Session-specific state management service for per-user conversation context.
 Manages session state storage with Redis and provides session lifecycle management.
 """
 
+import asyncio
 import logging
 import json
 import os
@@ -38,20 +39,38 @@ _STOPWORDS = {
 
 _SNIPPET_CHARS = 200
 
-# Retrieval backend for get_related_past_snippets: "local" (keyword ILIKE over
-# conversation_log) or "platform" (TencentDB-Agent-Memory L0 hybrid search).
-# Platform errors/timeouts always fall back to local — conversation_log stays
-# the source of truth either way.
-CLARA_MEMORY_BACKEND = os.getenv("CLARA_MEMORY_BACKEND", "local")
-CLARA_MEMORY_URL = os.getenv("CLARA_MEMORY_URL", "http://host.docker.internal:8420")
-# Hot conversation path: budget is tight on purpose, fallback is cheap.
-_PLATFORM_TIMEOUT_S = float(os.getenv("CLARA_MEMORY_TIMEOUT_S", "1.5"))
+# Cosine-similarity floor for vector recall. Returning fewer than `limit`
+# snippets is the correct outcome, not a bug — a vague message should recall
+# nothing rather than pad the prompt with the nearest line.
+#
+# Tuned on user 33's history: gemini-embedding-001 compresses this corpus into
+# roughly 0.48-0.72, so the floor lives in a narrow band. Off-topic queries
+# ("what's the weather in tokyo") top out at 0.49 and are cut cleanly; the
+# weakest hit that MUST survive is the disaster message at 0.62 against "the day
+# everything fell apart in the morning". Hence 0.60 — raising it to 0.62 loses
+# that recall, which is why the length filter below, not this number, does the
+# heavy lifting against padding.
+RECALL_SIMILARITY_FLOOR = float(os.getenv("CLARA_RECALL_FLOOR", "0.60"))
 
-# "**[user]** Session: k [2026-08-02T15:53:26.913Z] (score: 0.033)\n\n<content>"
-_PLATFORM_HIT = re.compile(
-    r"\*\*\[(?P<role>\w+)\]\*\*[^\[]*\[(?P<ts>[^\]]+)\][^\n]*\n+(?P<content>.+?)(?=\n---|\Z)",
-    re.DOTALL,
-)
+# Minimum row length to be recallable, and the more important of the two knobs.
+# Short generic lines sit near the centre of the embedding space and score high
+# against everything: on user 33's history "morning" scored 0.70 and "what
+# happened" 0.64 against "the day everything fell apart in the morning", while
+# the actual 341-char disaster message scored 0.62. No similarity floor can
+# separate those — length can, because a line worth recalling months later is
+# never seven characters long.
+# ponytail: length as a proxy for "has content". If a short-but-meaningful line
+# ("I got the job") ever needs recalling, filter on token variety instead.
+MIN_RECALL_CHARS = 40
+
+# Similarity bonus for consolidated role='memory' rows.
+# Not a thumb on the scale: a nightly memory is deliberately generic third-person
+# prose ("The user shared that his project situation improved"), so it loses
+# cosine to any verbatim line that happens to echo the user's own words — on the
+# demo query it scored 0.659 against 0.730 for the raw quote it was distilled
+# from. Without this, the rows we spend an LLM call producing are structurally
+# outranked by the rows they summarise.
+MEMORY_SIMILARITY_BOOST = 0.05
 
 
 class PastSnippet(BaseModel):
@@ -74,6 +93,34 @@ def _humanize_age(created_at: datetime) -> str:
     if days < 60:
         return f"{days // 7} weeks ago"
     return f"{days // 30} months ago"
+
+
+async def embed_logged_row(row_id: int, content: str) -> None:
+    """Attach an embedding to a freshly written conversation_log row. Best-effort."""
+    try:
+        from sqlalchemy import text as sql_text
+        from app.core.database import AsyncSessionLocal
+        from app.services.embeddings import embed_one, to_pgvector
+
+        # Don't spend an embedding call on a database that has nowhere to put the
+        # result (sqlite in tests, or any non-postgres deployment).
+        bind = getattr(AsyncSessionLocal, "kw", {}).get("bind")
+        if bind is not None and bind.dialect.name != "postgresql":
+            return
+
+        vector = await embed_one(content)
+        if vector is None:
+            return
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                sql_text(
+                    "UPDATE conversation_log SET embedding = CAST(:v AS vector) WHERE id = :id"
+                ),
+                {"v": to_pgvector(vector), "id": row_id},
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Embedding write failed for conversation_log {row_id}: {e}")
 
 
 def _keywords(message: str, limit: int = 6) -> List[str]:
@@ -389,16 +436,26 @@ class SessionStateService:
             from app.models.conversation_log import ConversationLog
 
             async with AsyncSessionLocal() as session:
-                session.add(ConversationLog(
+                row = ConversationLog(
                     user_id=str(user_id),
                     conversation_id=str(conversation_id),
                     role=role,
                     content=content,
                     meta=metadata or None,
-                ))
+                )
+                session.add(row)
                 await session.commit()
+                row_id = row.id
         except Exception as e:
             logger.warning(f"conversation_log write failed (turn unaffected): {e}")
+            return
+
+        # ponytail: fire-and-forget. The embedding costs ~450ms and this is the hot
+        # turn path; a dropped task just leaves the row NULL for the backfill script.
+        try:
+            asyncio.get_running_loop().create_task(embed_logged_row(row_id, content))
+        except RuntimeError:
+            pass
 
     async def get_related_past_snippets(
         self,
@@ -408,68 +465,102 @@ class SessionStateService:
         limit: int = 3
     ) -> List[PastSnippet]:
         """
-        Associative recall, dispatched on CLARA_MEMORY_BACKEND.
+        Associative recall from earlier conversations.
 
-        Default "local" is the keyword query below. "platform" asks
-        TencentDB-Agent-Memory for hybrid (vector + FTS) hits and falls back to
-        local on any error or timeout.
+        Semantic first: embed the incoming message and cosine-search the rows
+        that carry an embedding. Anything under RECALL_SIMILARITY_FLOOR is
+        dropped, so a vague message legitimately recalls nothing rather than
+        padding the prompt with the nearest generic line.
+
+        Falls back to the keyword query on ANY failure — no embedding key, no
+        pgvector, embeddings still backfilling, DB hiccup.
         """
-        if CLARA_MEMORY_BACKEND == "platform":
-            snippets = await self._platform_past_snippets(user_message, limit)
-            if snippets is not None:
-                return snippets
-        return await self._local_past_snippets(
+        snippets = await self._vector_past_snippets(
+            user_id, user_message, exclude_conversation_id, limit
+        )
+        if snippets is not None:
+            return snippets
+        return await self._keyword_past_snippets(
             user_id, user_message, exclude_conversation_id, limit
         )
 
-    async def _platform_past_snippets(
-        self, user_message: str, limit: int
+    async def _vector_past_snippets(
+        self,
+        user_id: str,
+        user_message: str,
+        exclude_conversation_id: str,
+        limit: int = 3,
     ) -> Optional[List[PastSnippet]]:
         """
-        L0 hybrid search against the memory platform.
+        Cosine search over conversation_log.embedding (postgres + pgvector only).
 
-        Returns None (not []) on failure so the caller can tell "platform is
-        down, use local" apart from "platform ran and found nothing".
+        Returns None (not []) when the vector path could not run, so the caller
+        can tell "unavailable, use keywords" apart from "ran, nothing cleared
+        the floor".
         """
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=_PLATFORM_TIMEOUT_S) as client:
-                resp = await client.post(
-                    f"{CLARA_MEMORY_URL}/search/conversations",
-                    json={"query": user_message, "limit": limit},
-                    headers={"x-tdai-service-id": "default"},
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", "")
-
-            snippets: List[PastSnippet] = []
-            for m in _PLATFORM_HIT.finditer(results):
-                content = m.group("content").strip()
-                if not content:
-                    continue
-                try:
-                    ts = datetime.fromisoformat(m.group("ts").replace("Z", "+00:00"))
-                    age = _humanize_age(ts)
-                except ValueError:
-                    age = "earlier"
-                snippets.append(PastSnippet(
-                    role=m.group("role"),
-                    content=(
-                        content[:_SNIPPET_CHARS].rstrip() + "..."
-                        if len(content) > _SNIPPET_CHARS else content
-                    ),
-                    age=age,
-                ))
-                if len(snippets) >= limit:
-                    break
-            return snippets
-
-        except Exception as e:
-            logger.warning(f"Platform recall failed, falling back to local: {e}")
+        if not user_message.strip():
             return None
 
-    async def _local_past_snippets(
+        try:
+            from sqlalchemy import text as sql_text
+            from app.core.database import AsyncSessionLocal
+            from app.services.embeddings import embed_one, to_pgvector
+
+            vector = await embed_one(user_message)
+            if vector is None:
+                return None
+
+            # 1 - cosine_distance is cosine similarity; pgvector's <=> is the distance.
+            # Both the floor and the ordering use the boosted score, so a memory
+            # just under the floor surfaces on the same terms it ranks by.
+            stmt = sql_text("""
+                WITH scored AS (
+                    SELECT role, content, created_at,
+                           1 - (embedding <=> CAST(:q AS vector))
+                             + CASE WHEN role = 'memory' THEN :memory_boost ELSE 0 END AS score
+                    FROM conversation_log
+                    WHERE user_id = :user_id
+                      AND conversation_id != :exclude_id
+                      AND embedding IS NOT NULL
+                      AND length(content) >= :min_chars
+                )
+                SELECT role, content, created_at, score FROM scored
+                WHERE score >= :floor
+                ORDER BY score DESC
+                LIMIT :limit
+            """)
+
+            async with AsyncSessionLocal() as session:
+                rows = (await session.execute(stmt, {
+                    "q": to_pgvector(vector),
+                    "user_id": str(user_id),
+                    "exclude_id": str(exclude_conversation_id),
+                    "min_chars": MIN_RECALL_CHARS,
+                    "memory_boost": MEMORY_SIMILARITY_BOOST,
+                    "floor": RECALL_SIMILARITY_FLOOR,
+                    "limit": limit,
+                })).all()
+
+            logger.debug(
+                "Vector recall: %d hit(s) over floor %.2f", len(rows), RECALL_SIMILARITY_FLOOR
+            )
+            return [
+                PastSnippet(
+                    role=row.role,
+                    content=(
+                        row.content[:_SNIPPET_CHARS].rstrip() + "..."
+                        if len(row.content) > _SNIPPET_CHARS else row.content
+                    ),
+                    age=_humanize_age(row.created_at),
+                )
+                for row in rows
+            ]
+
+        except Exception as e:
+            logger.warning(f"Vector recall unavailable, falling back to keywords: {e}")
+            return None
+
+    async def _keyword_past_snippets(
         self,
         user_id: str,
         user_message: str,
@@ -477,11 +568,11 @@ class SessionStateService:
         limit: int = 3
     ) -> List[PastSnippet]:
         """
-        Lines from OTHER conversations that share keywords with the incoming
-        message, most-matching first, then most recent.
+        Fallback recall: lines from OTHER conversations that share keywords with
+        the incoming message, most-matching first, then most recent.
 
-        ponytail: ILIKE keyword overlap, no embeddings. Swap in pg_trgm/tsvector or
-        a vector index if recall quality becomes the bottleneck.
+        Works on sqlite and on postgres without pgvector, which is exactly why it
+        stays: it is what runs whenever the semantic path can't.
 
         Best-effort: any failure returns [] so the turn proceeds without memories.
         """

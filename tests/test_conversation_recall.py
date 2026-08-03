@@ -91,8 +91,12 @@ async def test_recall_is_best_effort(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_platform_backend_falls_back_to_local_on_error(monkeypatch):
-    """Flag flipped to "platform", platform HTTP blows up → local keyword hit."""
+async def test_embedding_failure_falls_back_to_keyword(monkeypatch):
+    """No embedding (no key, quota, outage) → the keyword path still answers.
+
+    This is also the sqlite path: there is no pgvector here, so every other test
+    in this file is implicitly exercising the fallback too.
+    """
     now = datetime.now(timezone.utc)
     engine = await _seeded_maker(monkeypatch, [
         ConversationLog(
@@ -101,18 +105,10 @@ async def test_platform_backend_falls_back_to_local_on_error(monkeypatch):
             created_at=now - timedelta(days=2),
         ),
     ])
-    monkeypatch.setattr(
-        "app.services.session_state_service.CLARA_MEMORY_BACKEND", "platform"
-    )
 
-    class BoomClient:
-        def __init__(self, *a, **kw): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, *a, **kw):
-            raise RuntimeError("platform unreachable")
-
-    monkeypatch.setattr("httpx.AsyncClient", BoomClient)
+    async def no_embedding(_text):
+        return None
+    monkeypatch.setattr("app.services.embeddings.embed_one", no_embedding)
 
     snippets = await SessionStateService().get_related_past_snippets(
         user_id="42",
@@ -124,6 +120,87 @@ async def test_platform_backend_falls_back_to_local_on_error(monkeypatch):
         "that networking event was a disaster, I knew nobody there"
     ]
     await engine.dispose()
+
+
+class _CapturingSession:
+    """Stands in for an AsyncSession so the vector SQL can be inspected.
+
+    pgvector doesn't exist under sqlite, so the query itself can't run here —
+    what this guards is that the query keeps ASKING for the right things.
+    """
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.params = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def execute(self, stmt, params=None):
+        self.params = params
+        self.sql = " ".join(str(stmt).split())
+
+        class Result:
+            def __init__(self, rows): self._rows = rows
+            def all(self): return self._rows
+        return Result(self._rows)
+
+
+@pytest.mark.asyncio
+async def test_vector_search_excludes_current_conversation_and_applies_floor(monkeypatch):
+    from types import SimpleNamespace
+    from app.services.session_state_service import (
+        RECALL_SIMILARITY_FLOOR, MIN_RECALL_CHARS, MEMORY_SIMILARITY_BOOST,
+    )
+
+    async def fake_embed(_text):
+        return [0.1] * 768
+    monkeypatch.setattr("app.services.embeddings.embed_one", fake_embed)
+
+    session = _CapturingSession([
+        SimpleNamespace(
+            role="user", content="x" * 250,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1), score=0.81,
+        ),
+    ])
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", lambda: session)
+
+    snippets = await SessionStateService()._vector_past_snippets(
+        "42", "how did the pitch go?", "current-convo", 3
+    )
+
+    assert session.params["exclude_id"] == "current-convo"
+    assert session.params["user_id"] == "42"
+    assert session.params["floor"] == RECALL_SIMILARITY_FLOOR
+    assert session.params["min_chars"] == MIN_RECALL_CHARS
+    assert session.params["memory_boost"] == MEMORY_SIMILARITY_BOOST
+    # The floor and the exclusion must be enforced in SQL, not after the LIMIT.
+    assert "conversation_id != :exclude_id" in session.sql
+    assert "score >= :floor" in session.sql
+    assert "LIMIT :limit" in session.sql
+
+    assert len(snippets) == 1
+    assert snippets[0].content.endswith("...")  # truncated at _SNIPPET_CHARS
+    assert snippets[0].age == "yesterday"
+
+
+@pytest.mark.asyncio
+async def test_vector_path_returns_none_so_caller_falls_back(monkeypatch):
+    """None, not [], means "couldn't run" — [] would suppress the keyword path."""
+    async def fake_embed(_text):
+        return [0.1] * 768
+    monkeypatch.setattr("app.services.embeddings.embed_one", fake_embed)
+
+    def boom():
+        raise RuntimeError("no pgvector here")
+    monkeypatch.setattr("app.core.database.AsyncSessionLocal", boom)
+
+    assert await SessionStateService()._vector_past_snippets(
+        "42", "anything", "current", 3
+    ) is None
 
 
 def _prompt(**kwargs):
@@ -149,3 +226,20 @@ def test_memory_section_rendered_per_speaker():
     assert '- 2 days ago, they said: "the networking event was a disaster"' in prompt
     assert '- yesterday, you told them: "I hid by the snack table"' in prompt
     assert "only if it genuinely fits" in prompt
+
+
+def test_consolidated_memory_renders_without_speaker_or_quotes():
+    """A nightly memory was never *said* by either of them, so it reads differently."""
+    prompt = _prompt(past_memories=[
+        PastSnippet(
+            role="memory",
+            content="The user's three-week project was cancelled without warning.",
+            age="yesterday",
+        ),
+        PastSnippet(role="user", content="I hate mondays", age="yesterday"),
+    ])
+    assert "- you remember: The user's three-week project was cancelled without warning." in prompt
+    assert '"The user\'s three-week project was cancelled' not in prompt  # not quoted
+    assert "yesterday, they said" not in prompt.split("- you remember")[0].split(
+        "THINGS YOU REMEMBER")[1]  # memory line carries no timestamp
+    assert '- yesterday, they said: "I hate mondays"' in prompt  # others unchanged
