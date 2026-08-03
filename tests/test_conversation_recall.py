@@ -215,6 +215,7 @@ def _prompt(**kwargs):
 def test_memory_section_omitted_when_no_memories():
     assert "THINGS YOU REMEMBER" not in _prompt()
     assert "THINGS YOU REMEMBER" not in _prompt(past_memories=[])
+    assert "THEIR experiences" not in _prompt(past_memories=[])
 
 
 def test_memory_section_rendered_per_speaker():
@@ -226,6 +227,8 @@ def test_memory_section_rendered_per_speaker():
     assert '- 2 days ago, they said: "the networking event was a disaster"' in prompt
     assert '- yesterday, you told them: "I hid by the snack table"' in prompt
     assert "only if it genuinely fits" in prompt
+    # Clara used to absorb the user's stories as her own — ownership must be spelled out.
+    assert "THEIR experiences - react to them, never claim them as your own." in prompt
 
 
 def test_consolidated_memory_renders_without_speaker_or_quotes():

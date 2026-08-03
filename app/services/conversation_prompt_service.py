@@ -385,6 +385,8 @@ Response format:
             + "\n".join(lines)
             + "\nBring one of these up only if it genuinely fits what they just said - "
             "not every turn, and never recited back as a list or quoted word for word.\n"
+            "Lines about what THEY said or went through are THEIR experiences - "
+            "react to them, never claim them as your own.\n"
         )
 
     def _build_simulation_context_section(
